@@ -498,9 +498,12 @@ void loop() {
   }
   
  // reset joystick
-  if(analogRead(joyPinX) < 600 && analogRead(joyPinX) > 400){
+ 
+ // these values in the next line may need altering to match your joystick
+ // the code is looking to see when the joystick moves away from the center position
+  if(analogRead(joyPinX) < 550 && analogRead(joyPinX) > 450){
     interrupt_time4 = millis();
-    if (interrupt_time4 - last_interrupt_time2 >1000) {  // debounce delay            
+    if (interrupt_time4 - last_interrupt_time4 >500) {  // debounce delay            
       xValid = true;
     }
      last_interrupt_time4 = interrupt_time4;           
@@ -555,26 +558,25 @@ void loop() {
   //
   // grab a temperature and pressure reading at the top of each hour
 
-  if(now.minute() == 0 && now.second() == 0){  
-    if (doOnce ==false){
-      // reset data at midnight  
-      if(now.hour() == 0 && now.minute() == 0 && now.second() == 0){
-        resetDataStrings(); // save data and clear todays data, reset pointer    
-      }
-      //
-      recordPointer = now.hour();
-      recordDataTemp[0][recordPointer] = localTemp;
-      recordDataTemp[0][24] = recordPointer; // save the pointer
-      recordDataPressure[0][recordPointer] = localPressure/100; // convert to mb
-      recordDataPressure[0][24] = recordPointer; // save the pointer
-      recordNumber = recordNumber + 1; // increment the pointer
-      //
-      // REM this next line out if print out not required
-      printData(); // send data to serial monitor or could easily be modified to save data to an SD card
-     }
-     lastForecast = thisForecast; // save the last forecast
-     doOnce = true; // stop the temperature being read again in second = 0
-   }
+  if(now.minute() == 0 && now.second() == 0  && doOnce == false){  
+    // reset data at midnight  
+    if(now.hour() == 0 && now.minute() == 0 && now.second() == 0){
+      resetDataStrings(); // save data and clear todays data, reset pointer    
+    }
+    //
+    recordPointer = now.hour();
+    recordDataTemp[0][recordPointer] = localTemp;
+    recordDataTemp[0][24] = recordPointer; // save the pointer
+    recordDataPressure[0][recordPointer] = localPressure/100; // convert to mb
+    recordDataPressure[0][24] = recordPointer; // save the pointer
+    recordNumber = recordNumber + 1; // increment the pointer
+    //
+    // REM this next line out if print out not required
+    printData(); // send data to serial monitor or could easily be modified to save data to an SD card
+    lastForecast = thisForecast; // save the last forecast    
+    doOnce = true; // stop the temperature being read again in second = 0
+  }
+  //
   if(now.minute() == 0 && now.second() == 1 && doOnce == true){ 
     doOnce = false; // reset the flag
   } 
@@ -791,21 +793,21 @@ void drawTimer(){
 //
  void drawPressure(){
    // displays current pressure in mb
-   float temp = 0;
+   float tempReading = 0;
    u8g.setFont(u8g_font_profont15);
    u8g.drawStr(35,10, "Pressure:");
    //
    // check value against last reading
    u8g.setFont(u8g_font_profont15); 
-   if(recordDataPressure[0][recordPointer-1] > 0.00){
-     int tempReading = int(recordDataPressure[0][recordPointer]);
-     if(int(localPressure/100) > tempReading){ 
+   if(recordDataPressure[0][recordPointer] > 0.00){
+     tempReading = recordDataPressure[0][recordPointer];
+     if((localPressure/100) > tempReading){ 
        u8g.drawStr(30,60, "**Rising**"); 
      }
-     if(int(localPressure/100) < tempReading){ 
+     if((localPressure/100) < tempReading){ 
        u8g.drawStr(30,60, "**Falling**"); 
      }       
-     if(int(localPressure/100) == tempReading){ 
+     if((localPressure/100) == tempReading){ 
        u8g.drawStr(25,60, "**Constant**"); 
      }  
      if((localPressure/100) < 900){ 
@@ -966,67 +968,51 @@ void weatherForcast(){
   else{ 
     // report pressure
     if(int(recordDataPressure[0][recordPointer-1]) > int(recordDataPressure[0][recordPointer])){ // pressure is falling  
-      //u8g.drawStr(5,40, "Pressure is falling");
       if (int(recordDataPressure[0][recordPointer-1]) - int(recordDataPressure[0][recordPointer]) < 2){ // falling slowly
         if (int(recordDataPressure[0][recordPointer-1]) < 1009){
-          //u8g.drawStr(3,52, "Precipitation likely");
         thisForecast = "Precipitation likely";   
         } 
         if(int(recordDataPressure[0][recordPointer]) > 1008 && int(recordDataPressure[0][recordPointer-2]) < 1020){
-          //u8g.drawStr(25,52, "Little change.");
         thisForecast = "    Little change";          
          }
-        if (int(recordDataPressure[0][recordPointer]) > 1019){
-          //u8g.drawStr(25,52, "Remaining Fair");  
+        if (int(recordDataPressure[0][recordPointer]) > 1019){  
         thisForecast = "   Remaining Fair";          
         }         
       }
    //   
-      if(int(recordDataPressure[0][recordPointer-1]) - int(recordDataPressure[0][recordPointer]) > 2){ // falling more rapidly
-      //u8g.drawStr(5,40, "Pressure is falling"); 
-        if (int(recordDataPressure[0][recordPointer]) < 1009){        
-          //u8g.drawStr(23,52, "Stormy weather"); 
+      if(int(recordDataPressure[0][recordPointer-1]) - int(recordDataPressure[0][recordPointer]) > 2){ // falling more rapidly 
+        if (int(recordDataPressure[0][recordPointer]) < 1009){         
         thisForecast = "   Stormy weather";           
         }
         if (int(recordDataPressure[0][recordPointer]) > 1008 && int(recordDataPressure[0][recordPointer]) <1020){        
-          //u8g.drawStr(3,52, "Precipitation likely"); 
         thisForecast = "Precipitation likely";          
         } 
         if (int(recordDataPressure[0][recordPointer]) >1019){        
-          //u8g.drawStr(22,52, "Cloudy, warmer");
         thisForecast = "    Cloudy, warmer";          
         }        
       }      
     }
     //  
     if(int(recordDataPressure[0][recordPointer]) == int(recordDataPressure[0][recordPointer-1])){   // pressure is constant 
-      //u8g.drawStr(5,40, "Pressure is constant"); 
       if (int(recordDataPressure[0][recordPointer]) < 1009) {
-        //u8g.drawStr(15,52, "Clearing, cooler.");
         thisForecast = "   Clearing, cooler";        
       }
       if(int(recordDataPressure[0][recordPointer]) >1008 and int(recordDataPressure[0][recordPointer]) <1020){
-        //u8g.drawStr(8,52, "Continuing the same");
         thisForecast = " Continuing the same";        
       } 
       if(int(recordDataPressure[0][recordPointer]) > 1019){
-        //u8g.drawStr(9,52, "Remaining Fair");
         thisForecast = "   Remaining Fair";        
       }     
     }
     //
     if(int(recordDataPressure[0][recordPointer]) > int(recordDataPressure[0][recordPointer-1])){ // pressure is rising   
-      //u8g.drawStr(10,40, "Pressure is rising"); 
       if (int(recordDataPressure[0][recordPointer]) < 1009) {
-        //u8g.drawStr(17,52, "Clearing, cooler");
         thisForecast = "   Clearing, cooler";        
       }
       if(int(recordDataPressure[0][recordPointer]) >1008 and int(recordDataPressure[0][recordPointer]) <1020){
-        //u8g.drawStr(9,52, "Continue same");
         thisForecast = " Continuing the same";        
       } 
       if(int(recordDataPressure[0][recordPointer]) > 1019){
-        //u8g.drawStr(9,52, "Remaining Fair"); 
         thisForecast = "   Remaining Fair";        
       }     
     }
@@ -1035,12 +1021,14 @@ void weatherForcast(){
     if(switchForecast == false){
     // now print current forecast
       const char*newthisForecast = (const char*) thisForecast.c_str();
+      u8g.drawCircle(120,20,2); // draw circle to indicate this hour forecast      
       u8g.drawStr(3,35, newthisForecast);
       u8g.setFont(u8g_font_5x7);    
       u8g.drawStr(5,60, "Click for last forecast");       
     }
     else{
     // now print last forecast from 2 hours ago
+      u8g.drawCircle(120,43,2); // draw circle to indicate last hour forecast     
       const char*newlastForecast = (const char*) lastForecast.c_str();    
       if (lastForecast == ""){
         u8g.drawStr(16,35, "Waiting for Data");

@@ -15,12 +15,12 @@ to be positioned on the screen by altering the variables clockCentreX and clockC
 
 Using a IIC 128x64 OLED with SSD1306 chip and RTC DS1307 
 
-Connections:
+Connections: (All Pins are for the Arduino MEGA)
 
-Active Buzzer Alarm
+Active Buzzer Alarm::
 Vcc connect to Arduino 5 volts
 Gnd connect to Arduino Gnd
-Out connect to Arduino pin 4
+Out connect to Arduino Digital pin 4
 
 If Out is HIGH the buzzer is OFF
 If Out is LOW the Buzzer is ON
@@ -29,20 +29,58 @@ This sketch provides a pulsed output 1 second ON
 and 1 seconds OFF suitable for an alarm
 //
 //
-Wire RTC:
+Wire Joystick::
+  Gnd    ---> Arduino Gnd
+  Vcc    ---> Arduino 5 volts
+  Xout   ---> Arduino A0
+  Yout   ---> Arduino A1
+  Switch ---> Arduino Digital pin 2 (must be this pin for ISR to work)
+
+//
+//
+Wire RTC::
   VCC +5v
   GND GND
-  SDA Analog pin 4 on Uno, Mega pin 20
-  SCL Analog pin 5 on Uno, Mega pin 21
+  SDA Arduino Mega pin 20
+  SCL Arduino Mega pin 21
 //
 //
-Wire OLED:
+Wire OLED::
   VCC +5v
   GND GND
-  SDA Analog pin 4 on Uno, Mega pin 20
-  SCL Analog pin 5 on Uno, Mega pin 21
+  SDA Arduino Mega pin 20
+  SCL Arduino Mega pin 21
 //
 //
+Wire SD Card:: (pins shown for Arduino Mega)
+  GND    ---> Arduino GND
+  +3.3V  ---> N/A
+  +5V    ---> Arduino 5V
+  CS     ---> Arduino Mega pin 53
+  // next 3 pins must be via a Logic Level Converter, unless there is one on the SD card board
+  MOSI   ---> Arduino Mega pin 51
+  SCLK   ---> Arduino Mega pin 52
+  MISO   ---> Arduino Mega pin 50
+  //
+  GND    ---> N/A
+//
+//
+Wire Logic Level Converter::
+(if Needed for SD Card)
+  Gnd ---> Arduino Gnd
+  3.3v NOT CONNECTED IF board has a 3.3v regulator, otherwise Arduino 3.3v
+  +5v ---> Arduino 5 v
+  5 volt side 
+  A1 ---> Arduino pin 51
+  A2 ---> Arduino pin 50
+  A3 ---> Arduino pin 52
+  3.3v side
+  B1 ---> SD Card MOSI pin 5
+  B2 ---> SD Card MISO pin 7
+  B3 ---> SD Card SCLK pin 6
+//
+//
+
 
 ************************************************************/
 
@@ -54,23 +92,32 @@ Wire OLED:
   // BMP180
   #include "I2Cdev.h"
   #include "BMP085.h"
-  
-  
+  // SD Card
+  #include <SD.h>
+  //
+/**********************************************************************/  
+// User can change the following  variables as required
+//
+// Alarm Clock
+  int alarmHour = 7;
+  int alarmMinute = 30;
+  int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
+//
+/**********************************************************************/
 // setup u8g object
   U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);	// I2C 
 //
 
 // Setup RTC
   RTC_DS1307 RTC;
-  char monthString[37]= {"JanFebMarAprMayJunJulAugSepOctNovDec"};
-  int  monthIndex[122] ={0,3,6,9,12,15,18,21,24,27,30,33};
+  String monthString[12]= {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
   String thisMonth = "";
   String thisTime = "";
   String thisDay="";
   String thisWeekday ="";
   int clockCentreX = 64; // used to fix the centre the analog clock
   int clockCentreY = 32; // used to fix the centre the analog clock
-
+  String monthName = "";
 //
 // setup BMP180
   BMP085 barometer;
@@ -82,10 +129,14 @@ Wire OLED:
   float localTemp = 0.00;
   float localTempF = 0.00; // temp in Farenheit
   float localPressure = 0.00;
+  int lastPressure1 = 0.00;
+  int lastPressure2 = 0.00; 
   boolean showC = true;  // if false show temp in Farenheit
   boolean switchForecast = false; // if false then current forecast shown
+  boolean pascal = false; // flag to show if pascals should be shown
+  boolean grabFlag = false; // used to ensure only 1 reading is taken
   //
-  // Data strings, used to store temperature and pressure for 36 hours
+  // Data strings, used to store temperature and pressure for 48 hours
   float recordDataTemp[3][25];
   float recordDataPressure[3][25];  
   float tempYvalueP;    
@@ -96,20 +147,25 @@ Wire OLED:
 //
 // Variables and defines
 //
+  #define ledPin 13 // onboard LED
   #define buzzerPin 4 // the pin the buzzer is connected to
-  #define ledPin 13 // onboard led used for silent alarm
+  #define ledPin 9 // led pin used for silent alarm, LED must have a 220R resisitor
   #define joySwitch 2 // joystick switch
   #define joyPinX A1 // X pot output on joystick
   #define joyPinY A0 // Y pot output on joystick
-  
-  
+  #define CSpin 53 // SD Card CS pin
+  #define MOSIpin 51 // SD Card MOSI
+  #define MISOpin 50 // SD Card MISO pin
+  #define SCLKpin 52 // SD Card SCLK pin
+//  
+// SD Card
+  boolean sdPresent = false; // flag to show data can be written to SD Card
+  File ClockData; // text file on SD Card
+  String savedCardData = "";
+  String SDtemperature = ""; // build this string with current day temperature
+  String SDpressure = ""; // and this one with pressure
+//
 // Alarm Clock::
-//
-// User can change the following 3 variables as required
-//
-  int alarmHour = 7;
-  int alarmMinute = 30;
-  int maxAlarmTime = 10; //maximum time alarm sound for if seconds up to 59  
 //
 // flag to show an alarm has been set
   volatile boolean alarmSet = false;
@@ -120,11 +176,14 @@ Wire OLED:
 //
 // joystick::
 //
-  int joyX = 512; // midpoint
-  int joyY = 512; // midpoint
+// calibrate joystick
+  int joyX = 0;
+  int joyY = 0;
+//  
   boolean xValid = true;
   boolean yValid = false;
   volatile boolean buttonFlag = false;
+  
 //
 // timer::
 //
@@ -163,6 +222,8 @@ Wire OLED:
   const char* greetingTemp = "";
   volatile boolean timeAlarmSet = false;
 //
+// random number
+  long randNumber;
 // calendar::
 //
   int startDay = 0; // Sunday's value is 0, Saturday is 6
@@ -172,9 +233,9 @@ Wire OLED:
   String week4 ="";
   String week5 ="";
   int newWeekStart = 0; // used to show start of next week of the month
-  char monthString2[37]= {"JanFebMarAprMayJunJulAugSepOctNovDec"};
-  int  monthIndex2[122] ={0,3,6,9,12,15,18,21,24,27,30,33};
-  char monthName2[3]="";
+  int monthLength = 0;
+  boolean rhymeFlag = false; // used to show day rhyme screen if true
+  boolean rhymeMonthFlag = false; // used to show month rhyme if true
 //
 // moon phase
 static unsigned char full_moon_bits[] = {
@@ -273,14 +334,23 @@ static unsigned char waxing_gibbous_bits[] = {
    0x00, 0xff, 0xff, 0x07, 0x00, 0xff, 0xff, 0x03, 0xc0, 0xff, 0xff, 0x01,
    0xc0, 0xff, 0x7f, 0x00, 0x00, 0xff, 0x3f, 0x00, 0x00, 0xfe, 0x07, 0x00 };
 //
-String nfm = ""; // days to next full moon
-//
-//
+  String nfm = ""; // days to next full moon
+  boolean moonName = false; // flag to show which moon screen to display
+  int moonVerse = 1;
+// 
 /********************************************************/
 
 void setup(void) {
+  // the buzzer will sound twice if an SD card is present and working OK
+  // otherwise it will only sound once
   Serial.begin(9600);
   Wire.begin();
+  //  
+  u8g.firstPage();  
+    do {
+      splash(); 
+    } while( u8g.nextPage() );
+  //  
   RTC.begin();
   if (! RTC.isrunning()) {
     Serial.println("RTC is NOT running!");
@@ -298,8 +368,61 @@ void setup(void) {
   Serial.println("Testing device connections...");
   Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
   //
+    // Buzzer
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);  // turn the buzzer ON briefly
+  delay(200);
+  digitalWrite(buzzerPin, HIGH); // turn buzzer off
+  delay(200);
+  //  
+  // check for SD Card
+  //
+  pinMode(10, OUTPUT);  // needed to make the SD Library work
+  /* Initiliase the SD card */
+  Serial.println("Checking for SD Card");
+  if (!SD.begin(CSpin)){
+    // If there was an error output no card is present
+    Serial.println("No SD Card present");
+  }
+  else{
+    Serial.println("SD Card OK");
+    digitalWrite(buzzerPin, LOW); // turn on buzzer
+    delay(200);
+    digitalWrite(buzzerPin, HIGH); // turn buzzer off 
+    delay(200);   
+   /* Check if the text file exists */
+   if(SD.exists("data.csv")){
+     Serial.println("data.csv exists, new data will be added to this file...");
+   }
+   else{
+     Serial.println("data.csv does not exist, new file will be created...");
+     // Create a new text file on the SD card
+     Serial.println("Creating data.csv");
+     ClockData = SD.open("data.csv", FILE_WRITE);
+    // If the file was created ok then add come content
+      if (ClockData){
+        ClockData.println("Joystick Weather Clock Data");
+        // Close the file
+        ClockData.close();
+        sdPresent = true; // show card can be used 
+      }
+      else{
+        Serial.println("Failed to create file !");
+        sdPresent = false; // ignore the SD Card
+      }
+    }
+  }
+  //
   // joystick
   pinMode(joySwitch, INPUT);
+// calibrate joystick
+  joyX = analogRead(joyPinX); // midpoint for X
+  joyY = analogRead(joyPinY); // midpoint for Y 
+  Serial.println("calibrating joystick...."); 
+  Serial.print("X value = ");
+  Serial.print(joyX);
+  Serial.print(" : Y value = ");
+  Serial.println(joyY);
   //
   // setup Interrupt Service Routine
   attachInterrupt(0,joySwitchISR,FALLING); // uses pin 2
@@ -308,27 +431,22 @@ void setup(void) {
    getPressure(); // take a first reading 
    localTemp= temperature;
    localPressure = pressure; 
-  //  
-  u8g.firstPage();  
-    do {
-      splash(); 
-    } while( u8g.nextPage() );
-    delay(2000);
+  //
   //
   // on board LED
   pinMode(ledPin, OUTPUT);
   digitalWrite(ledPin, LOW); // turn off LED//// clear the data strings
   //  
-  // Buzzer
-  pinMode(buzzerPin, OUTPUT);
-  digitalWrite(buzzerPin, LOW);  // turn the buzzer ON briefly
-  //   
+  // generate random number seed
+  randomSeed(analogRead(5));  // assumes A5 is not connected to anything  
 }
 
 /*******************************************************/
 
 void loop() {
-  // see which screen to display
+//
+/* see which screen to display**************************/
+//
   switch (displayScreen){
     case 0:
       // draw an analog screen
@@ -403,7 +521,7 @@ void loop() {
      break;  
      //
      case 9:
-      // calendar display single day
+      // phase of the moon
      u8g.firstPage();      
      do {
        drawMoon(); // draw moon
@@ -414,7 +532,7 @@ void loop() {
       // calendar display single day
      u8g.firstPage();      
      do {
-       drawCalendar2(); // draw temperature
+       drawCalendar2(); 
      } while( u8g.nextPage() ); 
      break;      
      //
@@ -422,53 +540,113 @@ void loop() {
       // calendar display
      u8g.firstPage();      
      do {
-       drawCalendar(); // draw temperature
+       drawCalendar(); 
      } while( u8g.nextPage() ); 
      break;             
   } // end of switch loop
  // 
- // check if additional screens have been selected on the pressure plot
-  if(displayScreen == 12){
-    // show data from 24 hours ago
-    u8g.firstPage();      
-    do {
-      plotPressure_24(); //  pressure data from 24 hours ago
-    } while( u8g.nextPage() ); 
-  }
-  if(displayScreen == 13){
-    // show data from 36 hours ago
-    u8g.firstPage();      
-    do {
-      plotPressure_48(); // pressure data from 36 hours ago
-    } while( u8g.nextPage() ); 
-  } 
-  // additional temperature screens
-  if(displayScreen == 14){
-    // show data from 24 hours ago
-    u8g.firstPage();      
-    do {
-      plotTemperature_24(); //  pressure data from 24 hours ago
-    } while( u8g.nextPage() ); 
-  }
-  if(displayScreen == 15){
-    // show data from 36 hours ago
-    u8g.firstPage();      
-    do {
-      plotTemperature_48(); // pressure data from 36 hours ago
-    } while( u8g.nextPage() ); 
-  }   
- // end of additional screens
+ // check if additional screens have been selected
  //
- // take a temperature/pressure reading every 10 seconds
+  if(displayScreen > 11){
+    switch(displayScreen){
+      case 12:
+        // show data from 24 hours ago
+        u8g.firstPage();      
+        do {
+          plotPressure_24(); //  pressure data from 24 hours ago
+        } while( u8g.nextPage() ); 
+      break;
+      case 13:
+        // show data from 36 hours ago
+        u8g.firstPage();      
+        do {
+          plotPressure_48(); // pressure data from 48 hours ago
+        } while( u8g.nextPage() ); 
+      break; 
+      // additional temperature screens
+      case 14:
+        // show data from 24 hours ago
+        u8g.firstPage();      
+        do {
+          plotTemperature_24(); //  temperature data from 24 hours ago
+        } while( u8g.nextPage() ); 
+      break;
+      case 15:
+        // show data from 36 hours ago
+        u8g.firstPage();      
+        do {
+          plotTemperature_48(); // temperature data from 48 hours ago
+        } while( u8g.nextPage() );   
+      break;  
+      case 16:
+       // name the moon for each momth
+        u8g.firstPage();      
+        do {
+          nameMoon(); // names the full moon
+        } while( u8g.nextPage() );     
+      break;
+      case 17:
+       // day rhyme
+        u8g.firstPage();      
+        do {
+          childDay(); // rhyme for the day
+        } while( u8g.nextPage() );     
+      break;    
+      case 18:
+       // month rhyme
+        u8g.firstPage();      
+        do {
+          monthRhyme(); // rhyme for the month
+        } while( u8g.nextPage() );     
+      break;        
+    
+    } // end of switch
+  }   // end of additional screens                                      
+ //
+ //
+ /* get data and save data*******************************/
+ // take a temperature/pressure reading once only every 10 seconds
  // this should even out the display using the large fonts
   DateTime now = RTC.now();  // read the RTC 
-  if(int((now.second()/10)*10) == now.second()){
+  if(int((now.second()/10)*10) == now.second() && grabFlag == true){
     getPressure();
     localTemp= temperature;
     localPressure = pressure;
+    grabFlag = false; // stop value being read more than once
   }
- // 
- // check to see if alarm time reached
+  if(int(((now.second()-1)/10)*10) == (now.second()-1) && grabFlag == false){ // reset the flag
+    grabFlag = true;
+  } 
+ //
+ // grab a temperature and pressure reading at the top of each hour
+ //
+  if(now.minute() == 0 && now.second() == 0  && doOnce == false){  
+    // reset data at midnight  
+    if(now.hour() == 0){ // save data and clear todays data, reset pointer at midnight
+      resetDataStrings();     
+    }
+    //
+    recordPointer = now.hour();
+    recordDataTemp[0][recordPointer] = localTemp;
+    recordDataTemp[0][24] = recordPointer; // save the pointer
+    recordDataPressure[0][recordPointer] = localPressure/100; // convert to mb
+    recordDataPressure[0][24] = recordPointer; // save the pointer
+    recordNumber = recordNumber + 1; // increment the pointer
+    //
+    printData(); // send data to serial monitor or could easily be modified to save data to an SD card
+    lastForecast = thisForecast; // save the last forecast 
+    if (sdPresent == true){  
+      Write(); // send data to SD Card if there is one present
+    }
+    doOnce = true; // stop the temperature being read again in second = 0
+  }
+  //
+  if(now.minute() == 0 && now.second() == 1 && doOnce == true){ 
+    doOnce = false; // reset the flag
+  } 
+
+ /*******************************************************/ 
+ // check to see if the clock alarm time has been reached
   if (timeAlarmSet == true) {
     if(alarmHour == now.hour() && alarmMinute == now.minute() && now.second() < maxAlarmTime){    
       unsigned long buzzerCurrentMillis = millis();
@@ -496,14 +674,13 @@ void loop() {
     digitalWrite(buzzerPin, HIGH); // turn off buzzer
     digitalWrite(ledPin, LOW); // turn off LED     
   }
-  
+//
+/* read the joystick************************************/
+//
  // reset joystick
- 
- // these values in the next line may need altering to match your joystick
- // the code is looking to see when the joystick moves away from the center position
-  if(analogRead(joyPinX) < 550 && analogRead(joyPinX) > 450){
+  if(analogRead(joyPinX) < (joyX + 100) && analogRead(joyPinX) > (joyX - 100)){
     interrupt_time4 = millis();
-    if (interrupt_time4 - last_interrupt_time4 >500) {  // debounce delay            
+    if (interrupt_time4 - last_interrupt_time4 >200) {  // debounce delay            
       xValid = true;
     }
      last_interrupt_time4 = interrupt_time4;           
@@ -511,76 +688,62 @@ void loop() {
  // 
  // read joystick moving to right
   if(xValid == true){// allow reading to stabilise 
-    if(analogRead(joyPinX) > 900) {
+    if(analogRead(joyPinX) > (joyX + 100)) {
       xValid = false; // wait for the joystick to be released
       // reset displayScreen if additional screens were selected
      if(displayScreen == 12 || displayScreen == 13){
-     displayScreen = 5;
+      displayScreen = 5;
      }
      if(displayScreen == 14 || displayScreen == 15){
-     displayScreen = 8;
+      displayScreen = 8;
      }  
+     if(displayScreen == 16){
+       displayScreen = 9;
+     }  
+     if(displayScreen == 17){
+       displayScreen = 10; 
+     }  
+     if(displayScreen == 18){
+       displayScreen = 11; 
+     }         
      //         
       displayScreen = displayScreen + 1;
       if (displayScreen > screenMax){
         displayScreen = 0;      
       }
-     showData = 1; // reset the plot screens when we move away
-     showC = true; // reset to show Centigrade when we move away  
-     buttonFlag == false; //stop timers working when we leave screen 
-     switchForecast = false; // reset to show current forecast    
+      resetFlags();     
     }     
   }   
 //
 // read joystick moving to left
   if(xValid == true){
-    if(analogRead(joyPinX) < 480) {
+    if(analogRead(joyPinX) < (joyX - 50)) {
       xValid = false; // wait for the joystick to be released
      // reset displayScreen if additional screens were selected
      if(displayScreen == 12 || displayScreen == 13){
-     displayScreen = 5;
+       displayScreen = 5;
      }
      if(displayScreen == 14 || displayScreen == 15){
-     displayScreen = 8;
+       displayScreen = 8;
      }  
+     if(displayScreen == 16){
+       displayScreen = 9; 
+     } 
+     if(displayScreen == 17){
+       displayScreen = 10; 
+     }      
+     if(displayScreen == 18){
+       displayScreen = 11; 
+     }         
      //       
       displayScreen = displayScreen - 1;
-      if (displayScreen < 0 ){
-        displayScreen = screenMax;
-      }      
-     showData = 1; // reset the plot screens when we move away
-     showC = true; // reset to show Centigrade when we move away
-     buttonFlag == false; //stop timers working when we leave screen 
-     switchForecast = false; // reset to show current forecast         
+     if (displayScreen < 0 ){
+       displayScreen = screenMax;
+     }      
+     resetFlags();
     }
-  }     
-   
-  //
-  // grab a temperature and pressure reading at the top of each hour
-
-  if(now.minute() == 0 && now.second() == 0  && doOnce == false){  
-    // reset data at midnight  
-    if(now.hour() == 0 && now.minute() == 0 && now.second() == 0){
-      resetDataStrings(); // save data and clear todays data, reset pointer    
-    }
-    //
-    recordPointer = now.hour();
-    recordDataTemp[0][recordPointer] = localTemp;
-    recordDataTemp[0][24] = recordPointer; // save the pointer
-    recordDataPressure[0][recordPointer] = localPressure/100; // convert to mb
-    recordDataPressure[0][24] = recordPointer; // save the pointer
-    recordNumber = recordNumber + 1; // increment the pointer
-    //
-    // REM this next line out if print out not required
-    printData(); // send data to serial monitor or could easily be modified to save data to an SD card
-    lastForecast = thisForecast; // save the last forecast    
-    doOnce = true; // stop the temperature being read again in second = 0
-  }
-  //
-  if(now.minute() == 0 && now.second() == 1 && doOnce == true){ 
-    doOnce = false; // reset the flag
-  } 
-}
+  }       
+} // end of the main loop
 
 /*Screen 1 - Analog Clock*************************************/
 //
@@ -668,14 +831,11 @@ void drawDigital(){
 // display date at bottom of screen
   u8g.setFont(u8g_font_profont15);
   thisDay = String(now.day(), DEC) + "/"; 
-  thisMonth="";
-  for (int i=0; i<=2; i++){
-    thisMonth += monthString[monthIndex[now.month()-1]+i];
-  }  
+  thisMonth=monthString[now.month()-1]; 
   thisDay=thisDay + thisMonth + "/"; 
   thisDay=thisDay + String(now.year() , DEC);
   const char* newDay = (const char*) thisDay.c_str(); 
-  u8g.drawStr(25,63, newDay);    
+  u8g.drawStr(25,60, newDay);    
 }
 
 /*Screen 3 - Set Alarm Time*************************************/
@@ -707,7 +867,7 @@ void drawDigital(){
    }    
    // read Y joystick moving up and down
    // read joystick moving down
-   if(analogRead(joyPinY) > 800) { 
+   if(analogRead(joyPinY) > (joyY + 100)) { 
      unsigned long interrupt_time2 = millis();
      if (interrupt_time2 - last_interrupt_time2 >800) { 
        // set minutes
@@ -729,7 +889,7 @@ void drawDigital(){
    }
  //
  // read joystick moving up
-   if(analogRead(joyPinY) < 200) {   
+   if(analogRead(joyPinY) < (joyY - 100)) {   
      unsigned long interrupt_time2 = millis();
      if (interrupt_time2 - last_interrupt_time2 >800) { // slow things down
        // set minutes
@@ -816,12 +976,20 @@ void drawTimer(){
    }
    else{
      u8g.drawStr(22,60, " **Waiting**");      
-   }  
-   thisPressure = String(int(localPressure/100)) + "mb"; 
-   const char* newPressure = (const char*) thisPressure.c_str();
-   u8g.setFont(u8g_font_profont29);  
-   u8g.drawStr(20,40, newPressure); 
-   // show if the pressure is rising or falling   
+   }
+   if(pascal == false){  
+     thisPressure = String(int(localPressure/100)) + "mb"; 
+     const char* newPressure = (const char*) thisPressure.c_str();
+     u8g.setFont(u8g_font_profont29);  
+     u8g.drawStr(20,40, newPressure); 
+   }
+   else{
+     
+     thisPressure = String(round(localPressure)) + "pa";  
+     const char* newPressure = (const char*) thisPressure.c_str();
+     u8g.setFont(u8g_font_fub17);  
+     u8g.drawStr(15,40, newPressure); 
+   }
  }
 
 /*Screen 6 - Plot Pressure*************************************/
@@ -961,58 +1129,60 @@ void weatherForcast(){
    u8g.drawLine(0,15,128,15); // draw horizontal line   
  // we need at least two readings to make a forecast
  // forecast will not be available until 0100 each day 
-  if(recordNumber < 2){
+  if(recordNumber < 1){
     u8g.drawStr(16,35, "Waiting for Data");
   }    
  // if data available the show forecast
   else{ 
+    lastPressure1 = recordDataPressure[0][recordPointer];
+    lastPressure2 = recordDataPressure[0][recordPointer-1];
     // report pressure
-    if(int(recordDataPressure[0][recordPointer-1]) > int(recordDataPressure[0][recordPointer])){ // pressure is falling  
-      if (int(recordDataPressure[0][recordPointer-1]) - int(recordDataPressure[0][recordPointer]) < 2){ // falling slowly
-        if (int(recordDataPressure[0][recordPointer-1]) < 1009){
+    if(lastPressure2 > lastPressure1){ // pressure is falling  
+      if ((lastPressure2 - lastPressure1) < 3){ // falling slowly
+        if (lastPressure1 < 1009){
         thisForecast = "Precipitation likely";   
         } 
-        if(int(recordDataPressure[0][recordPointer]) > 1008 && int(recordDataPressure[0][recordPointer-2]) < 1020){
+        if(lastPressure1 > 1008 && lastPressure1 < 1020){
         thisForecast = "    Little change";          
          }
-        if (int(recordDataPressure[0][recordPointer]) > 1019){  
+        if (lastPressure1 > 1019){  
         thisForecast = "   Remaining Fair";          
         }         
       }
    //   
-      if(int(recordDataPressure[0][recordPointer-1]) - int(recordDataPressure[0][recordPointer]) > 2){ // falling more rapidly 
-        if (int(recordDataPressure[0][recordPointer]) < 1009){         
+      if((lastPressure2 - lastPressure1) > 2){ // falling more rapidly 
+        if (lastPressure1 < 1009){         
         thisForecast = "   Stormy weather";           
         }
-        if (int(recordDataPressure[0][recordPointer]) > 1008 && int(recordDataPressure[0][recordPointer]) <1020){        
+        if (lastPressure1 > 1008 && lastPressure1 <1020){        
         thisForecast = "Precipitation likely";          
         } 
-        if (int(recordDataPressure[0][recordPointer]) >1019){        
+        if (lastPressure1 >1019){        
         thisForecast = "    Cloudy, warmer";          
         }        
       }      
     }
     //  
-    if(int(recordDataPressure[0][recordPointer]) == int(recordDataPressure[0][recordPointer-1])){   // pressure is constant 
-      if (int(recordDataPressure[0][recordPointer]) < 1009) {
+    if(lastPressure1 == lastPressure2){   // pressure is constant 
+      if (lastPressure1 < 1009) {
         thisForecast = "   Clearing, cooler";        
       }
-      if(int(recordDataPressure[0][recordPointer]) >1008 and int(recordDataPressure[0][recordPointer]) <1020){
+      if(lastPressure1 >1008 and lastPressure1 <1020){
         thisForecast = " Continuing the same";        
       } 
-      if(int(recordDataPressure[0][recordPointer]) > 1019){
+      if(lastPressure1 > 1019){
         thisForecast = "   Remaining Fair";        
       }     
     }
     //
-    if(int(recordDataPressure[0][recordPointer]) > int(recordDataPressure[0][recordPointer-1])){ // pressure is rising   
-      if (int(recordDataPressure[0][recordPointer]) < 1009) {
+    if(lastPressure1 > lastPressure2){ // pressure is rising   
+      if (lastPressure1 < 1009) {
         thisForecast = "   Clearing, cooler";        
       }
-      if(int(recordDataPressure[0][recordPointer]) >1008 and int(recordDataPressure[0][recordPointer]) <1020){
+      if(lastPressure1 > 1008 and lastPressure1 <1020){
         thisForecast = " Continuing the same";        
       } 
-      if(int(recordDataPressure[0][recordPointer]) > 1019){
+      if(lastPressure1 > 1019){
         thisForecast = "   Remaining Fair";        
       }     
     }
@@ -1020,15 +1190,13 @@ void weatherForcast(){
     
     if(switchForecast == false){
     // now print current forecast
-      const char*newthisForecast = (const char*) thisForecast.c_str();
-      u8g.drawCircle(120,20,2); // draw circle to indicate this hour forecast      
+      const char*newthisForecast = (const char*) thisForecast.c_str();     
       u8g.drawStr(3,35, newthisForecast);
       u8g.setFont(u8g_font_5x7);    
       u8g.drawStr(5,60, "Click for last forecast");       
     }
     else{
-    // now print last forecast from 2 hours ago
-      u8g.drawCircle(120,43,2); // draw circle to indicate last hour forecast     
+    // now print last forecast from 2 hours ago   
       const char*newlastForecast = (const char*) lastForecast.c_str();    
       if (lastForecast == ""){
         u8g.drawStr(16,35, "Waiting for Data");
@@ -1036,7 +1204,8 @@ void weatherForcast(){
       else{
         u8g.drawStr(3,35, newlastForecast);      
       }
-      u8g.setFont(u8g_font_5x7);    
+      u8g.setFont(u8g_font_5x7); 
+      u8g.drawStr(37,43, "-old data-");
       u8g.drawStr(1,60, "Click for latest forecast");       
     }  
 }
@@ -1093,7 +1262,7 @@ void plotTemperature(){
    } 
    else{
      for(int f = 0; f < recordPointer+1;f++){  
-     // limit range to 0 -40 C
+     // limit range to 0 - 40 C
        tempYvalue = recordDataTemp[0][f];
        if(tempYvalue <0){
          tempYvalue = 0; // dont allow values below zero
@@ -1185,8 +1354,7 @@ void plotTemperature_48(){
 /*Screen 10 - Moon Phase*******************************************************/
 //
 void drawMoon(void){
-  DateTime now = RTC.now();  
-  u8g.setFont(u8g_font_profont12);  
+  DateTime now = RTC.now();    
   u8g.setFont(u8g_font_5x7); 
   u8g.drawStr(15,10, "Moon Phase Calculator"); 
   u8g.drawLine(0,13,128,13); 
@@ -1269,16 +1437,166 @@ double julianDate(int y, int m, int d){
 
   return j;
 }
+
+/*Screen 16 - Name of Moon*****************************************************/
+void nameMoon(){
+  // names the moon each month, selects a random version each time
+  DateTime now = RTC.now();  
+  String nameOfMoon ="";
+  //
+  if (moonVerse ==1){
+    // these are Celtic and Medieval attributed to Britian  
+    switch(now.month()){
+      case 1:
+        nameOfMoon ="    Woolf Moon";     
+      break;
+      case 2:
+        nameOfMoon ="    Storm Moon";      
+      break; 
+      case 3:
+        nameOfMoon ="   Plough Moon";       
+      break; 
+      case 4:
+        nameOfMoon ="    Seed Moon";     
+      break; 
+      case 5:
+        nameOfMoon ="  Mother's Moon";      
+      break; 
+      case 6:
+        nameOfMoon ="    Mead Moon";       
+      break; 
+      case 7:
+        nameOfMoon ="    Herb Moon";     
+      break; 
+      case 8:
+        nameOfMoon ="    Grain Moon";       
+      break; 
+      case 9:
+        nameOfMoon ="   Harvest Moon";     
+      break; 
+      case 10:
+        nameOfMoon ="    Blood Moon";       
+      break; 
+      case 11:
+        nameOfMoon ="  Mourning Moon";      
+      break; 
+      case 12:
+        nameOfMoon ="     Oak Moon";      
+      break;    
+    }
+  }
+  // These are native American Indian 
+  if (moonVerse ==2){
+    switch(now.month()){
+      case 1:
+        nameOfMoon ="   Winter Moon";      
+      break;
+      case 2:
+        nameOfMoon ="   Moon of Ice";       
+      break; 
+      case 3:
+        nameOfMoon ="    Crow Moon";      
+      break; 
+      case 4:
+        nameOfMoon ="    Frog Moon";       
+      break; 
+      case 5:
+        nameOfMoon ="   Flower Moon";       
+      break; 
+      case 6:
+        nameOfMoon ="  Planting Moon";      
+      break; 
+      case 7:
+        nameOfMoon ="    Hay Moon";       
+      break; 
+      case 8:
+        nameOfMoon ="  Dog Days Moon";      
+      break; 
+      case 9:
+        nameOfMoon ="   Barley Moon";        
+      break; 
+      case 10:
+        nameOfMoon =" Blackberry Moon";      
+      break; 
+      case 11:
+        nameOfMoon ="   Beaver Moon";       
+      break; 
+      case 12:
+        nameOfMoon =" Long Night Moon";     
+      break;    
+    }
+  } 
+  //
+  // These are Chinese Moons
+  if (moonVerse ==3){
+    switch(now.month()){
+      case 1:
+        nameOfMoon ="  Holiday Moon";     
+      break;
+      case 2:
+        nameOfMoon ="   Budding Moon";       
+      break; 
+      case 3:
+        nameOfMoon ="  Sleeping Moon";     
+      break; 
+      case 4:
+        nameOfMoon ="   Peony Moon";       
+      break; 
+      case 5:
+        nameOfMoon ="   Dragon Moon";         
+      break; 
+      case 6:
+        nameOfMoon ="   Lotus Moon";    
+      break; 
+      case 7:
+        nameOfMoon ="   Ghost Moon";     
+      break; 
+      case 8:
+        nameOfMoon ="   Harvest Moon";      
+      break; 
+      case 9:
+        nameOfMoon ="   Flower Moon";         
+      break; 
+      case 10:
+        nameOfMoon ="   Kindly Moon";       
+      break; 
+      case 11:
+        nameOfMoon ="   White Moon";       
+      break; 
+      case 12:
+        nameOfMoon ="   Butter Moon";        
+      break;    
+    }   
+  }
+ 
+  u8g.setFont(u8g_font_5x7);  
+  u8g.drawStr(10,10, "The full moon is called"); 
+  switch(moonVerse){
+    case 1:
+     u8g.drawStr(15,55, "from Medieval Britian");
+    break;
+    case 2:
+     u8g.drawStr(15,55, "North American Indian");
+    break;
+    case 3:
+     u8g.drawStr(15,55, " from Chinese Verse");
+    break;
+    
+  }
+  const char*newMoonName = (const char*) nameOfMoon.c_str();
+  u8g.setFont(u8g_font_profont15);   
+  u8g.drawStr(5,33, newMoonName); 
+}
+
 /*Screen 11 - Show Date****************************************/
 //
  void drawCalendar2(){
   // show todays date  
   DateTime now = RTC.now(); // get date
-  for (int i=0; i<=2; i++){
-    monthName2[i]=monthString2[monthIndex2[now.month()-1]+i];
-  }      
+  monthName = monthString[now.month()-1];      
   u8g.setFont(u8g_font_profont22); 
-  u8g.drawStr(47,22, monthName2);  
+  const char* newMonthName = (const char*) monthName.c_str();  
+  u8g.drawStr(47,22, newMonthName);  
   String dayNow = String(now.day());
   if (now.day() < 10){
     dayNow = "0" + dayNow;
@@ -1293,6 +1611,60 @@ double julianDate(int y, int m, int d){
   u8g.drawCircle(37,10,3);
   u8g.drawCircle(87,10,3);  
  }
+/*Screen 17 - Show day with childs attitude*****************************/  
+void childDay(){
+  // show the child born on day
+  DateTime now = RTC.now(); // get date
+  String rhymePart1 = "";
+  String rhymePart2 = "";
+  String rhymePart3 = ""; 
+  switch(now.dayOfWeek()){ 
+    case 0:
+      rhymePart1 = "The child born on the";
+      rhymePart2 = "Sabbath is fair wise";     
+      rhymePart3 = "and good in every way";
+    break;    
+    case 1:
+      rhymePart1 = " Monday's child is";
+      rhymePart2 = "   fair of face"; 
+    break;      
+    case 2:
+      rhymePart1 = "Tuesday's child is";
+      rhymePart2 = "  full of grace"; 
+    break;      
+    case 3:
+      rhymePart1 = "Wednesday's child is";
+      rhymePart2 = "    full of woe"; 
+    break;  
+    case 4:
+      rhymePart1 = "Thursday's child has";
+      rhymePart2 = "     far to go"; 
+    break;  
+    case 5:
+      rhymePart1 = "Friday's child works";
+      rhymePart2 = " hard for a living";
+    break; 
+    case 6:
+      rhymePart1 = "Saturday's child is";
+      rhymePart2 = " loving and giving";
+    break;  
+  }
+  u8g.setFont(u8g_font_5x7); 
+  const char*newRhyme1 = (const char*) rhymePart1.c_str();
+  const char*newRhyme2 = (const char*) rhymePart2.c_str();
+  const char*newRhyme3 = (const char*) rhymePart3.c_str();   
+  u8g.drawStr(19,60, "English Rhyme 1838"); 
+  u8g.setFont(u8g_font_profont12); 
+  if(now.dayOfWeek() == 0){ 
+    u8g.drawStr(1,15, newRhyme1);
+    u8g.drawStr(1,30, newRhyme2); 
+    u8g.drawStr(1,45, newRhyme3); 
+  }
+  else{
+    u8g.drawStr(8,20, newRhyme1);
+    u8g.drawStr(8,35, newRhyme2); 
+  }
+} 
 
 /*Screen 12 - Show months calendar*****************************/ 
 //
@@ -1303,6 +1675,12 @@ double julianDate(int y, int m, int d){
   // display this month
   DateTime now = RTC.now();
   //
+  // get number of days in month
+  if (now.month() == 1 || now.month() == 3 || now.month() == 5 || now.month() == 7 || now.month() == 8 || now.month() == 10 || now.month() == 12){
+    monthLength = 31;
+  }
+  else {monthLength = 30;}
+  if(now.month() == 2){monthLength = 28;}
   startDay = startDayOfWeek(now.year(),now.month(),1); // Sunday's value is 0
   // now build first week string
   switch (startDay){
@@ -1328,14 +1706,18 @@ double julianDate(int y, int m, int d){
       break; 
      case 5:
       // Friday
-      week1 = "                1  2";
+      if(monthLength == 28 || monthLength == 30){week1 = "                1  2";}      
+      if(monthLength == 31){week1 = "31              1  2";}      
       break; 
      case 6:
       // Saturday
-      week1 = "                   1";
+      if(monthLength == 28){week1 = "                   1";}
+      if(monthLength == 30){week1 = "30                 1";}      
+      if(monthLength == 31){week1 = "30 31              1";}       
+      
       break;           
   } // end first week
-  newWeekStart = (7-(7- startDay))+2;
+  newWeekStart = (7-startDay)+1;
   const char* newWeek1 = (const char*) week1.c_str();  
   u8g.drawStr(2,19,newWeek1); 
   // display week 2
@@ -1349,7 +1731,7 @@ double julianDate(int y, int m, int d){
   const char* newWeek2 = (const char*) week2.c_str();  
   u8g.drawStr(2,29,newWeek2); 
   // display week 3
-  newWeekStart = (14-(7- startDay))+2; 
+  newWeekStart = (14-startDay)+1; 
   week3 ="";
   for (int f = newWeekStart; f < newWeekStart + 7; f++){
     if(f<10){
@@ -1360,7 +1742,7 @@ double julianDate(int y, int m, int d){
   const char* newWeek3 = (const char*) week3.c_str();  
   u8g.drawStr(2,39,newWeek3);     
   // display week 4
-  newWeekStart = (21-(7- startDay))+2; 
+  newWeekStart = (21-startDay)+1; 
   week4 ="";
   for (int f = newWeekStart; f < newWeekStart + 7; f++){
     if(f<10){
@@ -1372,7 +1754,7 @@ double julianDate(int y, int m, int d){
    u8g.drawStr(2,49,newWeek4); 
    // do we need a fifth week
    week5="";
-   newWeekStart = (28-(7- startDay))+2;   
+   newWeekStart = (28-startDay)+1;   
    // is is February?
    if(newWeekStart > 28 && now.month() == 2){
    // do nothing unless its a leap year
@@ -1381,11 +1763,11 @@ double julianDate(int y, int m, int d){
      }       
    }
    else{ // print up to 30 anyway
-     for (int f = newWeekStart; f < 31; f++){
+     for (int f = newWeekStart; f < newWeekStart+7; f++){
        week5 = week5 + String(f) + " ";
      }
      // are there 31 days
-     if (now.month() == 1 || now.month() == 3 || now.month() == 5 || now.month() == 7 || now.month() == 8 || now.month() == 10 || now.month() == 12){
+     if (monthLength == 31 && week5.length() <7){
        week5 = week5 + "31"; 
      }  
    }
@@ -1393,6 +1775,89 @@ double julianDate(int y, int m, int d){
    u8g.drawStr(2,59,newWeek5);
  } 
 /**************************************************************/
+void monthRhyme(){
+  // show the child born on day
+  DateTime now = RTC.now(); // get date
+  String rhymePart1 = "";
+  String rhymePart2 = "";
+  String rhymePart3 = ""; 
+  switch(now.month()){ 
+    case 1:
+      rhymePart1 = " January brings the";
+      rhymePart2 = "snow, Makes our feet";     
+      rhymePart3 = "  and fingers glow";
+    break;    
+    case 2:
+      rhymePart1 = " February brings the";
+      rhymePart2 = "  rain, Thaws the"; 
+      rhymePart3 = " frozen lake again";      
+    break;      
+    case 3:
+      rhymePart1 = "March brings breezes";
+      rhymePart2 = "loud and shrill,Stirs"; 
+      rhymePart3 = "the dancing daffodil";       
+    break;      
+    case 4:
+      rhymePart1 = "April brings primrose";
+      rhymePart2 = "  sweet, Scatters"; 
+      rhymePart3 = " daises at our feet";
+    break;  
+    case 5:
+      rhymePart1 = "May brings flocks of ";
+      rhymePart2 = "pretty lambs,Skipping "; 
+      rhymePart3 = "by their fleecy damns";
+    break;  
+    case 6:
+      rhymePart1 = "  June brings roses,";
+      rhymePart2 = " Fills the children's"; 
+      rhymePart3 = "   hand with posies";
+    break; 
+    case 7:
+      rhymePart1 = " July brings cooling";
+      rhymePart2 = "  showers, Apricots "; 
+      rhymePart3 = "  and gillyflowers";
+    break;  
+    case 8:
+      rhymePart1 = "August brings sheaves";
+      rhymePart2 = " of corn, Then the"; 
+      rhymePart3 = "harvest home is borne";
+    break;      
+    case 9:
+      rhymePart1 = "Warm September brings";
+      rhymePart2 = "the fruit, Sportsmen "; 
+      rhymePart3 = "then begin to shoot";
+    break;     
+    case 10:
+      rhymePart1 = "Fresh October brings";
+      rhymePart2 = "pheasents, To gather"; 
+      rhymePart3 = "   nuts is pleasent";
+    break;     
+    case 11:
+      rhymePart1 = "Dull November brings";
+      rhymePart2 = "the blast,Then leaves"; 
+      rhymePart3 = "  are whirling fast";
+    break;      
+    case 12:
+      rhymePart1 = "Chill December brings";
+      rhymePart2 = "in sleet,Blazing fire"; 
+      rhymePart3 = " and Christmas treat";
+    break;      
+    
+  }
+  u8g.setFont(u8g_font_5x7); 
+  const char*newRhyme1 = (const char*) rhymePart1.c_str();
+  const char*newRhyme2 = (const char*) rhymePart2.c_str();
+  const char*newRhyme3 = (const char*) rhymePart3.c_str();   
+  u8g.drawStr(19,60, " by Sara Coleridge"); 
+  u8g.setFont(u8g_font_profont12); 
+    u8g.drawStr(1,15, newRhyme1);
+    u8g.drawStr(1,30, newRhyme2); 
+    u8g.drawStr(1,45, newRhyme3); 
+
+} 
+
+
+/*************************************************************/
 //
 // Sub Routines and Functions
 //
@@ -1410,18 +1875,21 @@ void resetDataStrings(){
     recordDataPressure[0][j] = 0.00;    
   } 
 //
-  recordPointer = 0; // reset pointer
   recordNumber = 0; // reset number of available data points
   }
 /**************************************************************/
  void printData(){
  // send temperature and pressure data to serial monitor
    DateTime now = RTC.now();
+   SDtemperature = "";
+   SDpressure = "";
+   
    Serial.print("Hour = ");
    Serial.print(recordPointer);
    Serial.println("   " + String(now.day()) + "-" + String(now.month()) + "-" + String(now.year()));
    Serial.println("Todays Temperature data:");
    for(int f = 0; f<25;f++){
+     SDtemperature = SDtemperature + String(recordDataTemp[0][f]);
      if(recordDataTemp[0][f] == 0.00){
        Serial.print("**");
      }
@@ -1433,6 +1901,7 @@ void resetDataStrings(){
      }
      else{
        Serial.print(",");
+       SDtemperature = SDtemperature + ","; // dont pur a comma after the last value
      }
    }    
    Serial.println("Yesterdays Temperature data:");
@@ -1468,6 +1937,7 @@ void resetDataStrings(){
    Serial.println("");
    Serial.println("Todays Pressure data:");
    for(int f = 0; f<25;f++){
+     SDpressure = SDpressure + String(recordDataPressure[0][f]);     
      if(recordDataPressure[0][f] == 0.00){
        Serial.print("**");
      }
@@ -1478,6 +1948,7 @@ void resetDataStrings(){
        Serial.println(":");
      }
      else{
+       SDpressure = SDpressure + ",";
        Serial.print(",");
      }
    }    
@@ -1573,7 +2044,48 @@ void joySwitchISR(){
        if(showData == 3){
         displayScreen = 15;
       }     
-    }   
+    }
+    if(displayScreen == 4){
+      pascal = !pascal;
+    }
+    if(displayScreen == 9 || displayScreen  == 16 ){
+      // button pressed on moon screen
+      moonName = !moonName;
+      if(moonName){
+        displayScreen = 16; // name of moon screen
+      }
+      else{
+        displayScreen = 9;
+      }
+    } 
+    if(displayScreen == 10 || displayScreen  == 17 ){
+      // button pressed on date screen
+      rhymeFlag = !rhymeFlag;
+      if(rhymeFlag){
+        displayScreen = 17; // day rhyme
+      }
+      else{
+        displayScreen = 10;
+      }
+    } 
+
+    if(displayScreen == 11 || displayScreen  == 18 ){
+      // button pressed on calendar screen
+      rhymeMonthFlag = !rhymeMonthFlag;
+      if(rhymeMonthFlag){
+        displayScreen = 18; // month rhyme
+      }
+      else{
+        displayScreen = 11;
+      }
+    }
+     
+    if(displayScreen == 16) {
+      // moon name screen, select a random set of moon names
+      randNumber = random(1,4);
+      moonVerse = randNumber;
+    }
+       
   } 
   last_interrupt_time = interrupt_time;
 }
@@ -1610,5 +2122,39 @@ void splash(){
   u8g.drawStr(21,30, "Weather Station");
   u8g.drawLine(0,40,128,40); 
   u8g.drawStr(24,55, "by Chris Rouse");    
+}
+/********************************************************/
+
+void Write(){
+  // data will be saved as a CSV file to enable it to be read into excel
+  DateTime now = RTC.now();  
+  if(SD.exists("data.csv")){  // check the card is still there  
+    // now append new data file 
+    ClockData = SD.open("data.csv", FILE_WRITE); // create new file
+    if (ClockData){
+      ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()) + "/"  + String(now.hour()) + ":00");
+      // now add this hours temperature and pressure strings
+      ClockData.println("," + SDtemperature); // moves the data across to column 2
+      ClockData.println("," + SDpressure);    
+      ClockData.close(); 
+    }
+  }
+  else{
+    Serial.println("Error writing to file !");
+    Serial.println("SD Card could be missing");
+  }
+}
+/********************************************************/
+void resetFlags(){
+  // reset flags when joystick moves left or right
+  showData = 1; // reset the plot screens when we move away
+  showC = true; // reset to show Centigrade when we move away  
+  buttonFlag == false; //stop timers working when we leave screen 
+  switchForecast = false; // reset to show current forecast 
+  moonName = false; // reset the moon screen to graphic display
+  rhymeFlag = false; // reset to page calendar 
+  rhymeMonthFlag = false; // reset to calendar
+  pascal = false; // show mb if false  
+  
 }
 /********************************************************/

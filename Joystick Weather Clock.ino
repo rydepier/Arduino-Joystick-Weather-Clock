@@ -16,7 +16,7 @@ to be positioned on the screen by altering the variables clockCentreX and clockC
 Using a IIC 128x64 OLED with SSD1306 chip and RTC DS1307 
 
 Connections: (All Pins are for the Arduino MEGA)
-
+ 
 Active Buzzer Alarm::
 Vcc connect to Arduino 5 volts
 Gnd connect to Arduino Gnd

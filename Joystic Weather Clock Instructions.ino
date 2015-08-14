@@ -43,7 +43,7 @@ void loop() {
   Serial.println("   is stored. This earlier data can be seen by pressing the joystick");
   Serial.println("   Pressing cycles through 3 screens, today, yesterday and the day before");
   Serial.println("   (Data is plotted after 2 pressure readings have been taken)");
-  Serial.println("");
+  Serial.println(""); 
   Serial.println("7. Weather Forecast - Uses rate of change and direction of pressure change");
   Serial.println("   to estimate the local weather for the next few hours. Based on the");
   Serial.println("   traditional barometer display");  

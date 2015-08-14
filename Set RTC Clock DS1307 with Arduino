@@ -9,7 +9,7 @@ RTC_DS1307 RTC;
 char monthString[37]= {"JanFebMarAprMayJunJulAugSepOctNovDec"};
 int  monthIndex[122] ={0,3,6,9,12,15,18,21,24,27,30,33};
 char monthName[3]="";
-
+//
 void setup () {
     Serial.begin(9600);
     Wire.begin();
@@ -20,7 +20,7 @@ void setup () {
     RTC.adjust(DateTime(__DATE__, __TIME__));
   
 }
-
+//
 void loop () {
     DateTime now = RTC.now();
     

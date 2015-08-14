@@ -32,10 +32,10 @@ and 1 seconds OFF suitable for an alarm
 Wire Joystick::
   Gnd    ---> Arduino Gnd
   Vcc    ---> Arduino 5 volts
-  Xout   ---> Arduino A0
-  Yout   ---> Arduino A1
+  Xout   ---> Arduino A1
+  Yout   ---> Arduino A0
   Switch ---> Arduino Digital pin 2 (must be this pin for ISR to work)
-
+  connect a 10k resistor between 5 volts and the switch to pull Digital pin 2 HIGH
 //
 //
 Wire RTC::

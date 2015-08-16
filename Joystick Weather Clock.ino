@@ -16,7 +16,7 @@ to be positioned on the screen by altering the variables clockCentreX and clockC
 Using a IIC 128x64 OLED with SSD1306 chip and RTC DS1307 
 
 Connections: (All Pins are for the Arduino MEGA)
- 
+
 Active Buzzer Alarm::
 Vcc connect to Arduino 5 volts
 Gnd connect to Arduino Gnd
@@ -32,10 +32,10 @@ and 1 seconds OFF suitable for an alarm
 Wire Joystick::
   Gnd    ---> Arduino Gnd
   Vcc    ---> Arduino 5 volts
-  Xout   ---> Arduino A1
-  Yout   ---> Arduino A0
+  Xout   ---> Arduino A0
+  Yout   ---> Arduino A1
   Switch ---> Arduino Digital pin 2 (must be this pin for ISR to work)
-  connect a 10k resistor between 5 volts and the switch to pull Digital pin 2 HIGH
+
 //
 //
 Wire RTC::
@@ -145,6 +145,13 @@ Wire Logic Level Converter::
   boolean doOnce = false; // only let temperature be read once for logging
   int recordNumber = 0; // counts data entries in current 24 hours
 //
+// SD Card
+  boolean sdPresent = false; // flag to show data can be written to SD Card
+  File ClockData; // text file on SD Card
+  String savedCardData = "";
+  String SDtemperature = ""; // build this string with current day temperature
+  String SDpressure = ""; // and this one with pressure
+//
 // Variables and defines
 //
   #define ledPin 13 // onboard LED
@@ -158,13 +165,6 @@ Wire Logic Level Converter::
   #define MISOpin 50 // SD Card MISO pin
   #define SCLKpin 52 // SD Card SCLK pin
 //  
-// SD Card
-  boolean sdPresent = false; // flag to show data can be written to SD Card
-  File ClockData; // text file on SD Card
-  String savedCardData = "";
-  String SDtemperature = ""; // build this string with current day temperature
-  String SDpressure = ""; // and this one with pressure
-//
 // Alarm Clock::
 //
 // flag to show an alarm has been set
@@ -385,14 +385,11 @@ void setup(void) {
     Serial.println("No SD Card present");
   }
   else{
-    Serial.println("SD Card OK");
-    digitalWrite(buzzerPin, LOW); // turn on buzzer
-    delay(200);
-    digitalWrite(buzzerPin, HIGH); // turn buzzer off 
-    delay(200);   
+    Serial.println("SD Card OK"); 
    /* Check if the text file exists */
    if(SD.exists("data.csv")){
      Serial.println("data.csv exists, new data will be added to this file...");
+     sdPresent = true; // show card can be used      
    }
    else{
      Serial.println("data.csv does not exist, new file will be created...");
@@ -412,6 +409,12 @@ void setup(void) {
       }
     }
   }
+  if(sdPresent){  // second buzz
+    digitalWrite(buzzerPin, LOW); // turn on buzzer
+    delay(200);
+    digitalWrite(buzzerPin, HIGH); // turn buzzer off 
+    delay(200);
+  }  
   //
   // joystick
   pinMode(joySwitch, INPUT);

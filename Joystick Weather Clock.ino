@@ -36,7 +36,7 @@ Wire Joystick::
   Yout   ---> Arduino A1
   Switch ---> Arduino Digital pin 2 (must be this pin for ISR to work)
 
-//
+// 
 //
 Wire RTC::
   VCC +5v

@@ -36,7 +36,7 @@ Wire Joystick::
   Yout   ---> Arduino A1
   Switch ---> Arduino Digital pin 2 (must be this pin for ISR to work)
 
-// 
+//
 //
 Wire RTC::
   VCC +5v
@@ -383,6 +383,7 @@ void setup(void) {
   if (!SD.begin(CSpin)){
     // If there was an error output no card is present
     Serial.println("No SD Card present");
+    sdPresent = false; // show NO CARD present    
   }
   else{
     Serial.println("SD Card OK"); 
@@ -399,6 +400,7 @@ void setup(void) {
     // If the file was created ok then add come content
       if (ClockData){
         ClockData.println("Joystick Weather Clock Data");
+        ClockData.println("Date,00:00,01:00,02:00,03:00,04:00,05:00,06:00,07:00,08:00,09:00,10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00,22:00,23:00,Time");
         // Close the file
         ClockData.close();
         sdPresent = true; // show card can be used 
@@ -442,6 +444,10 @@ void setup(void) {
   //  
   // generate random number seed
   randomSeed(analogRead(5));  // assumes A5 is not connected to anything  
+  //
+  Serial.println("Clock now running ....");
+  Serial.println("");
+  //
 }
 
 /*******************************************************/
@@ -1221,10 +1227,10 @@ void weatherForcast(){
  //
    if(showC == false){
    localTempF = localTemp * 1.8 + 32.0; 
-   thisTemperature = String(int(localTempF)) + "*F";   
+   thisTemperature = String(int(localTempF)) + "\260F";  // displays degree symbol 
    }
    else{
-     thisTemperature = String(int(localTemp)) + "*C"; 
+     thisTemperature = String(int(localTemp)) + "\260C"; // displays degree symbol
    }
    const char* newTemperature = (const char*) thisTemperature.c_str();
    u8g.setFont(u8g_font_profont29);    
@@ -2135,7 +2141,7 @@ void Write(){
     // now append new data file 
     ClockData = SD.open("data.csv", FILE_WRITE); // create new file
     if (ClockData){
-      ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()) + "/"  + String(now.hour()) + ":00");
+      ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()));
       // now add this hours temperature and pressure strings
       ClockData.println("," + SDtemperature); // moves the data across to column 2
       ClockData.println("," + SDpressure);    

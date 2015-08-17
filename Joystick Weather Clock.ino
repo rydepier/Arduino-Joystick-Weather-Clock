@@ -123,8 +123,8 @@ Wire Logic Level Converter::
   BMP085 barometer;
   int temperature;
   float pressure;
-  String thisPressure = "";
-  String thisTemperature = "";
+  String thisPressure = "Waiting for Data";
+  String thisTemperature = "Waiting for Data";
   int showData = 1; // used to show data screen 1 = now, 2 = -24hrs, 3 = -48hrs
   float localTemp = 0.00;
   float localTempF = 0.00; // temp in Farenheit
@@ -400,7 +400,7 @@ void setup(void) {
     // If the file was created ok then add come content
       if (ClockData){
         ClockData.println("Joystick Weather Clock Data");
-        ClockData.println("Date,00:00,01:00,02:00,03:00,04:00,05:00,06:00,07:00,08:00,09:00,10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00,22:00,23:00,Time");
+        ClockData.println("Date,00:00,01:00,02:00,03:00,04:00,05:00,06:00,07:00,08:00,09:00,10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00,22:00,23:00,Time (hrs)");
         // Close the file
         ClockData.close();
         sdPresent = true; // show card can be used 
@@ -445,6 +445,7 @@ void setup(void) {
   // generate random number seed
   randomSeed(analogRead(5));  // assumes A5 is not connected to anything  
   //
+  getForecast(); // read forcast to set up strings
   Serial.println("Clock now running ....");
   Serial.println("");
   //
@@ -642,8 +643,9 @@ void loop() {
     recordDataPressure[0][24] = recordPointer; // save the pointer
     recordNumber = recordNumber + 1; // increment the pointer
     //
-    printData(); // send data to serial monitor or could easily be modified to save data to an SD card
     lastForecast = thisForecast; // save the last forecast 
+    getForecast(); // get new forecast
+    printData(); // send data to serial monitor
     if (sdPresent == true){  
       Write(); // send data to SD Card if there is one present
     }
@@ -1132,14 +1134,36 @@ void weatherForcast(){
   Under 1009mb  Clearing, cooler    Precipitation    Storm
   */
   // uses pressure to forcast weather
+  // The forecast is collected when data is collected once an hour 
    u8g.drawLine(0,50,128,50);    
    u8g.setFont(u8g_font_profont12); 
    u8g.drawStr(20,10, "Weather Forcast"); 
-   u8g.drawLine(0,15,128,15); // draw horizontal line   
+   u8g.drawLine(0,15,128,15); // draw horizontal line     
+   if(switchForecast == false){
+   // now print current forecast
+     const char*newthisForecast = (const char*) thisForecast.c_str();     
+     u8g.drawStr(3,35, newthisForecast);
+     u8g.setFont(u8g_font_5x7);    
+     u8g.drawStr(5,60, "Click for last forecast");       
+   }
+   else{
+   // now print last forecast from 2 hours ago   
+    const char*newlastForecast = (const char*) lastForecast.c_str();    
+    u8g.drawStr(3,35, newlastForecast);      
+    u8g.setFont(u8g_font_5x7); 
+    u8g.drawStr(37,43, "-old data-");
+    u8g.drawStr(1,60, "Click for latest forecast");       
+  }  
+}
+/* collect a forecast ******************************************/
+// allows a forecast to be collected without printing it
+void getForecast(){
+  // get the forecast
  // we need at least two readings to make a forecast
  // forecast will not be available until 0100 each day 
   if(recordNumber < 1){
-    u8g.drawStr(16,35, "Waiting for Data");
+    thisForecast = "  Waiting for Data";
+    lastForecast = "  Waiting for Data"; 
   }    
  // if data available the show forecast
   else{ 
@@ -1195,28 +1219,8 @@ void weatherForcast(){
         thisForecast = "   Remaining Fair";        
       }     
     }
-  }
-    
-    if(switchForecast == false){
-    // now print current forecast
-      const char*newthisForecast = (const char*) thisForecast.c_str();     
-      u8g.drawStr(3,35, newthisForecast);
-      u8g.setFont(u8g_font_5x7);    
-      u8g.drawStr(5,60, "Click for last forecast");       
-    }
-    else{
-    // now print last forecast from 2 hours ago   
-      const char*newlastForecast = (const char*) lastForecast.c_str();    
-      if (lastForecast == ""){
-        u8g.drawStr(16,35, "Waiting for Data");
-      }
-      else{
-        u8g.drawStr(3,35, newlastForecast);      
-      }
-      u8g.setFont(u8g_font_5x7); 
-      u8g.drawStr(37,43, "-old data-");
-      u8g.drawStr(1,60, "Click for latest forecast");       
-    }  
+  }  
+// returns thisForecast with the current forecast  
 }
 /*Screen 8 - Show temperature***********************************/
 //
@@ -2143,8 +2147,8 @@ void Write(){
     if (ClockData){
       ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()));
       // now add this hours temperature and pressure strings
-      ClockData.println("," + SDtemperature); // moves the data across to column 2
-      ClockData.println("," + SDpressure);    
+      ClockData.println("Temp(C)," + SDtemperature); // moves the data across to column 2
+      ClockData.println("Press(mb)," + SDpressure);    
       ClockData.close(); 
     }
   }

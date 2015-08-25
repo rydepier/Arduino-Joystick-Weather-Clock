@@ -100,8 +100,7 @@ Wire Resistors, 10k
 // Alarm Clock
   int alarmHour = 7;
   int alarmMinute = 30;
-  int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59 
-  boolean getBackup = true; // loads bacupup from SD card set to false no to load  
+  int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
 //
 /**********************************************************************/
 // setup u8g object
@@ -330,13 +329,6 @@ void setup(void) {
   Serial.begin(9600);
   Wire.begin();
   // 
-  // push to close switch (stops backup data loading)
-  pinMode(5, INPUT);
-  int b = digitalRead(5);
-  if(b == LOW){
-    getBackup = false; // dont load backup data
-  } 
- // 
   u8g.firstPage();  
     do {
       splash(); 
@@ -381,11 +373,11 @@ void setup(void) {
     Serial.println("SD Card OK"); 
    //Check if the data file exists
    if(SD.exists("data.csv")){
-     //Serial.println("data.csv exists, new data will be added to this file...");
+     Serial.println(F("data.csv exists, new data will be added to this file..."));
      sdPresent = true; // show card can be used      
    }
    else{
-     //Serial.println("data.csv does not exist, new file will be created...");
+     Serial.println(F("data.csv does not exist, new file will be created..."));
      // Create a new text file on the SD card
      //Serial.println("Creating data.csv");
      ClockData = SD.open("data.csv", FILE_WRITE);
@@ -398,12 +390,11 @@ void setup(void) {
         sdPresent = true; // show card can be used 
       }
       else{
-        //Serial.println("Failed to create file !");
+        Serial.println(F("Failed to create file !"));
         sdPresent = false; // ignore the SD Card
         ClockData.close();        
       }
     }
-  }
   if(sdPresent){  // second buzz
     digitalWrite(4, LOW); // turn on buzzer
     delay(200);
@@ -411,7 +402,6 @@ void setup(void) {
     delay(200);    
     // look for a backup file
     if(SD.exists("backup.dat")){       
-      if (getBackup == true){
         Serial.println(F("Uploading Backup Data ...."));      
         ClockData = SD.open("backup.dat", FILE_WRITE);       
         if (!ClockData) {
@@ -431,7 +421,7 @@ void setup(void) {
      else{ // create new backup.dat and fill with blank data
        ClockData = SD.open("backup.dat", FILE_WRITE);
        for(int f = 0; f < 6;f++){
-       ClockData.println(F("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"));
+         ClockData.println(F("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"));
        }
        ClockData.close();
      }

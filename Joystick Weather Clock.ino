@@ -4,9 +4,8 @@ by Chris Rouse July 2015
 
 This sketch uses an Arduino Mega to provide more memory
 
-The program uses 82% of dynamic memory, all the debug output sent
-to the Serial Monitor has been REM'd out, otherwise there is only around
-900 bytes of dynamic memory available. In the event of a problem, and you wish
+The program uses 72% of dynamic memory, some of the debug output sent
+to the Serial Monitor has been REM'd out. In the event of a problem, and you wish
 to follow what happens (eg SD Card problems etc) these lines can be reinstated.
 
 

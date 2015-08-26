@@ -82,6 +82,10 @@ Wire Resistors, 10k
   Digital Pin 2 to 5v (Joystick Switch)
 //
 //
+Small LED to show backup data being saved to SD Card
+  Connect cathode to pin 12, then Anode via a resitor, 470R to Gnd
+//
+//
 
 ************************************************************/
 

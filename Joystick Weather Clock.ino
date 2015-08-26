@@ -142,6 +142,7 @@ Wire Resistors, 10k
 // SD Card
   boolean sdPresent = false; // flag to show data can be written to SD Card
   File ClockData; // text file on SD Card
+  File BackUp; // text file on SD card
   String SDtemperature = ""; // build this string with current day temperature
   String SDpressure = ""; // and this one with pressure
 //
@@ -323,7 +324,7 @@ static unsigned char waxing_gibbous_bits[] = {
 
 /********************************************************/
 
-void setup(void) {
+void setup(void) {  
   // the buzzer will sound twice if an SD card is present and working OK
   // otherwise it will only sound once
   Serial.begin(9600);
@@ -351,6 +352,10 @@ void setup(void) {
   //Serial.println("Testing device connections...");
   //Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
   //
+  // led used to show backup being written
+  pinMode(12, OUTPUT);
+  digitalWrite(12, LOW); // turn it off
+  //
   // Buzzer
   pinMode(4, OUTPUT);
   digitalWrite(4, LOW);  // turn the buzzer ON briefly
@@ -369,14 +374,14 @@ void setup(void) {
     //Serial.println("No SD Card present");
     sdPresent = false; // show NO CARD present    
   }
-  else{
+  else{ 
     Serial.println("SD Card OK"); 
    //Check if the data file exists
    if(SD.exists("data.csv")){
      Serial.println(F("data.csv exists, new data will be added to this file..."));
      sdPresent = true; // show card can be used      
    }
-   else{
+   else{ 
      Serial.println(F("data.csv does not exist, new file will be created..."));
      // Create a new text file on the SD card
      //Serial.println("Creating data.csv");
@@ -394,36 +399,37 @@ void setup(void) {
         sdPresent = false; // ignore the SD Card
         ClockData.close();        
       }
-    }
-  if(sdPresent){  // second buzz
+    } 
+  if(sdPresent){  // second buzz  4
     digitalWrite(4, LOW); // turn on buzzer
     delay(200);
     digitalWrite(4, HIGH); // turn buzzer off 
     delay(200);    
     // look for a backup file
-    if(SD.exists("backup.dat")){       
+    if(SD.exists("backup.dat")){ // 5       
         Serial.println(F("Uploading Backup Data ...."));      
-        ClockData = SD.open("backup.dat", FILE_WRITE);       
-        if (!ClockData) {
-          ClockData.close();
+      
+        if (!SD.exists("backup.dat")) {
+          BackUp.close();
           Serial.println(F("Failed to open backup.dat"));
         }
         else{ 
+          digitalWrite(12, HIGH); // turn on LED to show backup being written          
           // third beep
           digitalWrite(4, LOW); // turn on buzzer
           delay(200);
           digitalWrite(4, HIGH); // turn buzzer off
           //           
-          loadBackup();
+          loadBackup();          
+          digitalWrite(12, LOW); // turn on LED to show backup being written
         }
-       }
-     }
+       } 
      else{ // create new backup.dat and fill with blank data
-       ClockData = SD.open("backup.dat", FILE_WRITE);
+       BackUp = SD.open("backup.dat", FILE_WRITE);
        for(int f = 0; f < 6;f++){
-         ClockData.println(F("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"));
+         BackUp.print(F("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\r\n"));
        }
-       ClockData.close();
+       BackUp.close();
      }
    }
  
@@ -446,9 +452,6 @@ void setup(void) {
   pinMode(13, OUTPUT);
   digitalWrite(13, LOW); // turn off LED//// clear the data strings
   //  
-  // generate random number seed
-  randomSeed(analogRead(5));  // assumes A5 is not connected to anything  
-  //
   // get initial time and recordPointer
   DateTime now = RTC.now();  // read the RTC 
   recordPointer = now.hour();  
@@ -456,7 +459,8 @@ void setup(void) {
   Serial.println(F(""));
   //
   displayScreen = 0; // reset to home screen
-}
+  } 
+} 
 
 /*******************************************************/
 
@@ -650,7 +654,7 @@ void loop() {
     recordDataPressure[0][24] = recordPointer; // save the pointer
     recordNumber = recordNumber + 1; // increment the pointer
     //
-    printData(); // send data to serial monitor
+    printData(); // build temperature and pressure data strings
     // check for card, it may have been removed, then re-inserted
     if(SD.exists("data.csv")){ 
       ClockData = SD.open("data.csv", FILE_WRITE);
@@ -658,12 +662,15 @@ void loop() {
       ClockData.close(); // close the file    
     }
     if(SD.exists("backup.dat")){ 
-      ClockData = SD.open("backup.dat", FILE_WRITE);
+      SD.remove("backup.dat");  // delete old backup    
+      BackUp = SD.open("backup.dat", FILE_WRITE);
+      digitalWrite(12, HIGH); // turn on LED to show backup being written
       saveBackup(); // now save the backup file
-      ClockData.close(); // close the file
+      digitalWrite(12, LOW); // turn it off      
+      BackUp.close(); // close the file
     }
     else{
-      ClockData.close(); // close the file
+      BackUp.close(); // close the file
       Serial.println(F("SD Card not present, or files missing"));   
     }
     doOnce = true; // stop the temperature being read again in second = 0
@@ -1026,20 +1033,8 @@ void plotPressure(){
    double tempYvalue;   
    u8g.setFont(u8g_font_5x7); 
    u8g.drawStr(30,10, "Pressure Today");
-   u8g.drawFrame(0,0,128,64);
-   u8g.drawLine(19,64,19,59);
-   u8g.drawLine(34,64,34,59);
-   u8g.drawLine(49,64,49,59);   
-   u8g.drawLine(64,64,64,54); // 12 hour mark
-   u8g.drawLine(79,64,79,59);    
-   u8g.drawLine(94,64,94,59);
-   u8g.drawLine(109,64,109,59);
-  // horizontal lines
-   // the baseline is 900mb
-   // the top line is 1020mb
-   u8g.drawLine(0,42,128,42); // 1000mb  
-   u8g.drawLine(0,21,128,21); // 1010mb
-   if(recordDataPressure[0][24] == 0.00){
+   drawPressureGraph(); // outline graph
+   if(recordNumber == 0.00){
      u8g.drawStr(19,35, "Data not available");
    }    
    // now plot graph
@@ -1067,23 +1062,7 @@ void plotPressure_24(){
    double tempYvalue;   
    u8g.setFont(u8g_font_5x7); 
    u8g.drawStr(19,10, "Pressure Yesterday");
-   u8g.drawFrame(0,0,128,64);
-   u8g.drawLine(19,64,19,59);
-   u8g.drawLine(34,64,34,59);
-   u8g.drawLine(49,64,49,59);   
-   u8g.drawLine(64,64,64,54); // 12 hour mark
-   u8g.drawLine(79,64,79,59);    
-   u8g.drawLine(94,64,94,59);
-   u8g.drawLine(109,64,109,59);
-  // horizontal lines
-   // the baseline is 900mb
-   // the top line is 1020mb
-   u8g.drawLine(0,42,128,42); // 1000mb  
-   u8g.drawLine(0,21,128,21); // 1010mb  
-   // now plot graph
-   // x starts at 4 pixels and each hour is 5 pixels
-   // y is 2.1 pixels per 10mb 
-   // as 0,0 pixel is top left, value for y should be subtracted from 64
+   drawPressureGraph(); // outline graph
    if(recordDataPressure[1][24] == 0.00){
      u8g.drawStr(19,35, "Data not available");
    }
@@ -1108,23 +1087,7 @@ void plotPressure_48(){
   double tempYvalue;    
   u8g.setFont(u8g_font_5x7); 
   u8g.drawStr(16,10, "Pressure 48 hrs ago");   
-  u8g.drawFrame(0,0,128,64);
-  u8g.drawLine(19,64,19,59);
-  u8g.drawLine(34,64,34,59);
-  u8g.drawLine(49,64,49,59);   
-  u8g.drawLine(64,64,64,54); // 12 hour mark
-  u8g.drawLine(79,64,79,59);    
-  u8g.drawLine(94,64,94,59);
-  u8g.drawLine(109,64,109,59);
-  // horizontal lines
-  // the baseline is 900mb
-  // the top line is 1020mb
-  u8g.drawLine(0,42,128,42); // 1000mb  
-  u8g.drawLine(0,21,128,21); // 1010mb  
-  // now plot graph
-  // x starts at 4 pixels and each hour is 5 pixels
-  // y is 2.1 pixels per 10mb 
-  // as 0,0 pixel is top left, value for y should be subtracted from 64
+  drawPressureGraph(); // outline graph
   if(recordDataPressure[2][24] == 0.00){
     u8g.drawStr(19,35, "Data not available");
   }
@@ -1158,34 +1121,39 @@ void weatherForcast(){
    u8g.drawLine(0,50,128,50);    
    u8g.setFont(u8g_font_profont12); 
    u8g.drawStr(18,10, "Weather Forecast"); 
-   u8g.drawLine(0,15,128,15); // draw horizontal line     
-   if(switchForecast == false){
-   // now print current forecast
-     const char*newthisForecast = (const char*) thisForecast.c_str();     
-     u8g.drawStr(3,35, newthisForecast);
-     u8g.setFont(u8g_font_5x7);    
-     u8g.drawStr(5,60, "Click for long forecast");       
+   u8g.drawLine(0,15,128,15); // draw horizontal line
+   if(thisForecast == "  Waiting for Data" && longForecast == "  Waiting for Data"){    
+     u8g.drawStr(3,35, "  Waiting for Data");
    }
-   else{
-   // now print forecast based on last 2 hours  
-    const char*newthisForecast = (const char*) thisForecast.c_str();    
-    u8g.drawStr(3,35, newthisForecast);      
-    u8g.setFont(u8g_font_5x7); 
-    u8g.drawStr(5,60, "Click for short forecast");       
-  } 
-  // show direction and ammount
-  String ra = "";
-  if(riseAmmount > 100 || riseAmmount< -100){
-   ra =  rise + String(riseAmmount/100) + "mb";
-   riseAmmount = riseAmmount/100;   
-  }
-  else{
-   ra =  rise + String(riseAmmount) + "pa";
-  }
-  const char*newDirection = (const char*)ra.c_str();
-  u8g.setFont(u8g_font_profont12);   
-  u8g.drawStr(25,47, newDirection); 
-  //
+   else{   
+     if(switchForecast == false){
+     // now print current forecast
+       const char*newthisForecast = (const char*) thisForecast.c_str();     
+       u8g.drawStr(3,35, newthisForecast);
+       u8g.setFont(u8g_font_5x7);    
+       u8g.drawStr(5,60, "Click for long forecast");       
+     }
+     else{
+     // now print forecast based on last 2 hours  
+       const char*newthisForecast = (const char*) thisForecast.c_str();    
+       u8g.drawStr(3,35, newthisForecast);      
+       u8g.setFont(u8g_font_5x7); 
+       u8g.drawStr(5,60, "Click for short forecast");       
+     } 
+     // show direction and ammount
+     String ra = "";
+     if(riseAmmount > 100 || riseAmmount< -100){
+       ra =  rise + String(riseAmmount/100) + "mb";
+       riseAmmount = riseAmmount/100;   
+     }
+     else{
+       ra =  rise + String(riseAmmount) + "pa";
+     }
+     const char*newDirection = (const char*)ra.c_str();
+     u8g.setFont(u8g_font_profont12);   
+     u8g.drawStr(25,47, newDirection); 
+     //
+   }
 }
 /* collect a forecast ******************************************/
 // allows a forecast to be collected without printing it
@@ -1259,10 +1227,10 @@ void getForecast(){
         thisForecast = "   Remaining Fair";        
       }   
     }
-  }  
-  lastPressure1 = lastPressure1 *100;
-  lastPressure2 = lastPressure2 *100;  
-  riseAmmount = lastPressure1 - lastPressure2;    
+    lastPressure1 = lastPressure1 *100;
+    lastPressure2 = lastPressure2 *100;  
+    riseAmmount = lastPressure1 - lastPressure2;    
+  }     
 // returns thisForecast with the current forecast  
 }
 /*Screen 8 - Show temperature***********************************/
@@ -1299,23 +1267,12 @@ void plotTemperature(){
   double tempYvalue;    
   u8g.setFont(u8g_font_5x7); 
   u8g.drawStr(20,10, "Temperature Today");   
-  u8g.drawFrame(0,0,128,64);
-  u8g.drawLine(19,64,19,59);
-  u8g.drawLine(34,64,34,59);
-  u8g.drawLine(49,64,49,59);   
-  u8g.drawLine(64,64,64,54); // 12 hour mark
-  u8g.drawLine(79,64,79,59);    
-  u8g.drawLine(94,64,94,59);
-  u8g.drawLine(109,64,109,59);
-  // horizontal lines
-  u8g.drawLine(0,48,128,48); // 10 degrees C  
-  u8g.drawLine(0,32,128,32); // 20 degrees C 
-  u8g.drawLine(0,16,128,16); // 30 degrees C 
+  drawTemperatureGraph();
   // now plot graph
   // x starts at 4 pixels and each hour is 5 pixels
   // y is 1.6 pixels per degree centigrade 
   // as 0,0 pixel is top left, value for y should be subtracted from 64
-  if(recordDataTemp[0][24] == 0.00){
+  if(recordNumber == 0.00){
     u8g.drawStr(19,28, "Data not available");
   } 
   else{
@@ -1339,22 +1296,7 @@ void plotTemperature_24(){
   double tempYvalue;    
   u8g.setFont(u8g_font_5x7); 
   u8g.drawStr(25,10, "Temp. Yesterday");   
-  u8g.drawFrame(0,0,128,64);
-  u8g.drawLine(19,64,19,59);
-  u8g.drawLine(34,64,34,59);
-  u8g.drawLine(49,64,49,59);   
-  u8g.drawLine(64,64,64,54); // 12 hour mark
-  u8g.drawLine(79,64,79,59);    
-  u8g.drawLine(94,64,94,59);
-  u8g.drawLine(109,64,109,59);
-  // horizontal lines
-  u8g.drawLine(0,48,128,48); // 10 degrees C  
-  u8g.drawLine(0,32,128,32); // 20 degrees C 
-  u8g.drawLine(0,16,128,16); // 30 degrees C 
-  // now plot graph
-  // x starts at 4 pixels and each hour is 5 pixels
-  // y is 1.6 pixels per degree centigrade 
-  // as 0,0 pixel is top left, value for y should be subtracted from 64
+  drawTemperatureGraph();
   if(recordDataTemp[1][24] == 0.00){
     u8g.drawStr(19,28, "Data not available");
   } 
@@ -1379,22 +1321,7 @@ void plotTemperature_48(){
   double tempYvalue;    
   u8g.setFont(u8g_font_5x7); 
   u8g.drawStr(23,10, "Temp. 48 hrs ago");   
-  u8g.drawFrame(0,0,128,64);
-  u8g.drawLine(19,64,19,59);
-  u8g.drawLine(34,64,34,59);
-  u8g.drawLine(49,64,49,59);   
-  u8g.drawLine(64,64,64,54); // 12 hour mark
-  u8g.drawLine(79,64,79,59);    
-  u8g.drawLine(94,64,94,59);
-  u8g.drawLine(109,64,109,59);
- // horizontal lines
-  u8g.drawLine(0,48,128,48); // 10 degrees C  
-  u8g.drawLine(0,32,128,32); // 20 degrees C 
-  u8g.drawLine(0,16,128,16); // 30 degrees C 
-  // now plot graph
-  // x starts at 4 pixels and each hour is 5 pixels
-  // y is 1.6 pixels per degree centigrade 
-  // as 0,0 pixel is top left, value for y should be subtracted from 64
+  drawTemperatureGraph();
   if(recordDataTemp[2][24] == 0.00){
     u8g.drawStr(19,28, "Data not available");
   } 
@@ -1930,7 +1857,7 @@ int j = 0;
   }
 /**************************************************************/
  void printData(){
- // send temperature and pressure data to serial monitor
+ //build temperature and pressure data strings
    DateTime now = RTC.now();
    SDtemperature = "";
    SDpressure = "";
@@ -2103,7 +2030,7 @@ size_t readField(File* file, char* str, size_t size, char* delim) {
   char ch;
   size_t n = 0;
   while ((n + 1) < size && file->read(&ch, 1) == 1) {
-    // Delete CR.
+    // Delete CR. 
     if (ch == '\r') {
       continue;
     }
@@ -2118,27 +2045,26 @@ size_t readField(File* file, char* str, size_t size, char* delim) {
 /*********************************************************/
 //
  void loadBackup(){ 
-   boolean error1 = false;
    //float array[6][25];// Array for data.
+   BackUp = SD.open("backup.dat", FILE_WRITE);
+   BackUp.seek(0); // rewind for read  
    int p = 0;     // First array index.
    int q = 0;     // Second array index
    size_t n;      // Length of returned field with delimiter.
    char str[30];  // Must hold longest field with delimiter and zero byte.
    char *ptr;     // Test for valid field. 
    DateTime now = RTC.now();  // read the RTC 
-   recordPointer = now.hour();  
-   // Rewind file so test data is not appended.
-   ClockData.seek(0);
+   recordPointer = now.hour(); 
    // Read the file and store the data.
    for (p = 0; p < 6; p++) {
      for (q = 0; q < 25; q++) { 
-        n = readField(&ClockData, str, sizeof(str), ",\n");
+        n = readField(&BackUp, str, sizeof(str), ",\n");   
         if (n == 0) {
           Serial.println(F("Too few lines"));
         } 
         if(p > 2){
           recordDataPressure[p-3][q] = (strtol(str, &ptr, 10));
-          recordDataPressure[p-3][q] = recordDataPressure[p-3][q]/100;  
+          recordDataPressure[p-3][q] = recordDataPressure[p-3][q]/100;  // divide by 100 to get mb
         }
         else{
           recordDataTemp[p][q] = strtol(str, &ptr, 10);        
@@ -2152,6 +2078,7 @@ size_t readField(File* file, char* str, size_t size, char* delim) {
         recordNumber = recordNumber + 1;
       }
     }
+    BackUp.close();
   }
 //
 /********************************************************/
@@ -2169,8 +2096,6 @@ void saveBackup(){
   // save this hours backup data to backup.dat 
   int j =0;
   int f = 0;
-  SD.remove("backup.dat");  // delete old backup
-  ClockData = SD.open("backup.dat", FILE_WRITE);
   SDtemperature = "";
   SDpressure = "";
   // save the temperature data
@@ -2181,7 +2106,8 @@ void saveBackup(){
         SDtemperature = SDtemperature + ",";
       }  
     } 
-    ClockData.println(SDtemperature); // print first line  
+    SDtemperature = SDtemperature + "\r\n";
+    BackUp.print(SDtemperature); // print first line  
     SDtemperature = ""; // reset string
   }
    // now save pressure data
@@ -2192,8 +2118,42 @@ void saveBackup(){
         SDpressure = SDpressure + ",";
       }   
     } 
-    ClockData.println(SDpressure); // print first line 
+    SDpressure = SDpressure + "\r\n";
+    BackUp.print(SDpressure); // print first line 
     SDpressure = ""; // reset string
   }  
+}
+/**********************************************************/
+void drawPressureGraph(){
+  // draws skeleton graph
+   u8g.drawFrame(0,0,128,64);
+   u8g.drawLine(19,64,19,59);
+   u8g.drawLine(34,64,34,59);
+   u8g.drawLine(49,64,49,59);   
+   u8g.drawLine(64,64,64,54); // 12 hour mark
+   u8g.drawLine(79,64,79,59);    
+   u8g.drawLine(94,64,94,59);
+   u8g.drawLine(109,64,109,59);
+  // horizontal lines
+   // the baseline is 900mb
+   // the top line is 1020mb
+   u8g.drawLine(0,42,128,42); // 1000mb  
+   u8g.drawLine(0,21,128,21); // 1010mb 
+}
+/**********************************************************/
+void drawTemperatureGraph(){
+  // draws skeleton graph
+  u8g.drawFrame(0,0,128,64);
+  u8g.drawLine(19,64,19,59);
+  u8g.drawLine(34,64,34,59);
+  u8g.drawLine(49,64,49,59);   
+  u8g.drawLine(64,64,64,54); // 12 hour mark
+  u8g.drawLine(79,64,79,59);    
+  u8g.drawLine(94,64,94,59);
+  u8g.drawLine(109,64,109,59);
+  // horizontal lines
+  u8g.drawLine(0,48,128,48); // 10 degrees C  
+  u8g.drawLine(0,32,128,32); // 20 degrees C 
+  u8g.drawLine(0,16,128,16); // 30 degrees C 
 }
 /**********************************************************/

@@ -846,8 +846,22 @@ void drawAnalog(void) {  // draws an analog clock face
 //
 void drawDigital(){
   // shows time in Digital Format  
-  u8g.setFont(u8g_font_profont15);
-  if(timeAlarmSet){u8g.drawStr(80,10, "Alarm");} // show alarm is set   
+  u8g.setFont(u8g_font_profont12);
+  String alarmSetTime = "Alarm set for ";
+  if(alarmHour <10){
+    alarmSetTime = alarmSetTime + "0" + String(alarmHour);
+  }
+  else{
+    alarmSetTime = alarmSetTime + String(alarmHour);
+  }
+  if(alarmMinute <10){
+    alarmSetTime = alarmSetTime +  ":" + "0" + String(alarmMinute);
+  }
+  else{
+    alarmSetTime = alarmSetTime +  ":" + String(alarmMinute);    
+  }
+  const char* newalarmSetTime = (const char*) alarmSetTime.c_str();  
+  if(timeAlarmSet){u8g.drawStr(8,10, newalarmSetTime);} // show alarm is set   
     u8g.setFont(u8g_font_profont29); 
     DateTime now = RTC.now();   
     // display time in digital format
@@ -874,7 +888,6 @@ void drawDigital(){
     const char* newDay = (const char*) thisDay.c_str(); 
     u8g.drawStr(25,60, newDay);    
 }
-
 /*Screen 3 - Set Alarm Time*************************************/
 //
 

@@ -1155,7 +1155,7 @@ void weatherForcast(){
      }
      const char*newDirection = (const char*)ra.c_str();
      u8g.setFont(u8g_font_profont12);   
-     u8g.drawStr(25,47, newDirection); 
+     u8g.drawStr(14,47, newDirection); 
      //
    }
 }

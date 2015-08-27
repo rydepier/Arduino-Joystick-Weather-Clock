@@ -1,13 +1,10 @@
 /***********************************************************
 Joystick controlled Clock using OLED Display
-by Chris Rouse July 2015
+by Chris Rouse August 2015
 
 This sketch uses an Arduino Mega to provide more memory
 
-The program uses 72% of dynamic memory, some of the debug output sent
-to the Serial Monitor has been REM'd out. In the event of a problem, and you wish
-to follow what happens (eg SD Card problems etc) these lines can be reinstated.
-
+The program uses 73% of dynamic memory.
 
 OLED Analog Clock using U8GLIB Library
 
@@ -80,10 +77,8 @@ Wire Logic Level Converter::
 Wire Resistors, 10k
   Digital Pin 2 to 5v (Joystick Switch)
 //
-//
 Small LED to show backup data being saved to SD Card
   Connect cathode to pin 12, then Anode via a resitor, 470R to Gnd
-//
 //
 
 ************************************************************/
@@ -352,8 +347,8 @@ void setup(void) {
   Serial.println(F("Initializing I2C devices..."));
   barometer.initialize();
   // verify connection
-  //Serial.println("Testing device connections...");
-  //Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
+  Serial.println(F("Testing device connections..."));
+  Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
   //
   // led used to show backup being written
   pinMode(12, OUTPUT);
@@ -374,11 +369,11 @@ void setup(void) {
   //Serial.println("Checking for SD Card");
   if (!SD.begin(53)){
     // If there was an error output no card is present
-    //Serial.println("No SD Card present");
+    Serial.println(F("No SD Card present"));
     sdPresent = false; // show NO CARD present    
   }
   else{ 
-    Serial.println("SD Card OK"); 
+    Serial.println(F("SD Card OK")); 
    //Check if the data file exists
    if(SD.exists("data.csv")){
      Serial.println(F("data.csv exists, new data will be added to this file..."));
@@ -434,8 +429,7 @@ void setup(void) {
        }
        BackUp.close();
      }
-   }
- 
+   } 
   //
   // joystick
   pinMode(2, INPUT);
@@ -464,7 +458,6 @@ void setup(void) {
   displayScreen = 0; // reset to home screen
   } 
 } 
-
 /*******************************************************/
 
 void loop() {
@@ -665,7 +658,8 @@ void loop() {
       ClockData.close(); // close the file    
     }
     if(SD.exists("backup.dat")){ 
-      SD.remove("backup.dat");  // delete old backup    
+      SD.remove("backup.dat");  // delete old backup 
+      delay(50);   
       BackUp = SD.open("backup.dat", FILE_WRITE);
       digitalWrite(12, HIGH); // turn on LED to show backup being written
       saveBackup(); // now save the backup file
@@ -683,8 +677,7 @@ void loop() {
     doOnce = false; // reset the flag
   } 
 
- /*******************************************************/ 
- // check to see if the clock alarm time has been reached
+ //* check to see if the clock alarm time has been reached ************
   if (timeAlarmSet == true) {
     if(alarmHour == now.hour() && alarmMinute == now.minute() && now.second() < maxAlarmTime){    
       unsigned long buzzerCurrentMillis = millis();
@@ -887,6 +880,7 @@ void drawDigital(){
     const char* newDay = (const char*) thisDay.c_str(); 
     u8g.drawStr(25,60, newDay);    
 }
+
 /*Screen 3 - Set Alarm Time*************************************/
 //
 
@@ -967,6 +961,7 @@ void drawTimer(){
   u8g.drawStr(45,10, "Timer:");  
  // 
   if (buttonFlag == false){  
+    digitalWrite(4, HIGH); // turn buzzer off     
     u8g.drawStr(20,60, "CLICK to Start");   
     u8g.setFont(u8g_font_profont29);
     u8g.drawStr(25,40, newTimeTimer);
@@ -978,12 +973,26 @@ void drawTimer(){
     unsigned long currentMillis = millis();
     if(currentMillis - previousMillis >= interval) {
       previousMillis = currentMillis;        
-      timerSecs = timerSecs + 1;       
+      timerSecs = timerSecs + 1; 
+      if(timerSecs >1){
+        digitalWrite(4, HIGH); // turn buzzer off         
+      }      
       if (timerSecs == 60){ 
         timerSecs = 0;  
         timerMins = timerMins + 1;
+        if(int(timerMins/10)*10 == timerMins){  // once every 10 min
+          digitalWrite(4, LOW); // turn buzzer on`           
+        }
         if (timerMins >= 99){
           buttonFlag = false; // stop counting
+          // sound buzzer twice
+          digitalWrite(4, LOW); // turn on buzzer
+          delay(200);
+          digitalWrite(4, HIGH); // turn buzzer off  
+          delay(200); 
+          digitalWrite(4, LOW); // turn on buzzer
+          delay(200);
+          digitalWrite(4, HIGH); // turn buzzer off          
         }
       }  
     }  
@@ -1847,7 +1856,6 @@ void monthRhyme(){
     u8g.drawStr(1,15, newRhyme1);
     u8g.drawStr(1,30, newRhyme2); 
     u8g.drawStr(1,45, newRhyme3); 
-
 } 
 
 /*************************************************************/

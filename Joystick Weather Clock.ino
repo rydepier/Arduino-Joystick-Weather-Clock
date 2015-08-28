@@ -15,13 +15,11 @@ Using a IIC 128x64 OLED with SSD1306 chip and RTC DS1307
 
 Connections: (All Pins are for the Arduino MEGA)
 
-Wire Active Buzzer Alarm::
-Vcc connect to Arduino 5 volts
-Gnd connect to Arduino Gnd
-Out connect to Arduino Digital pin 4
+Wire Buzzer Alarm::
+  Vcc connect to Arduino 5 volts
+  Input connect to Arduino pin 4
+  Gnd connect to Arduino Gnd
 
-If Out is HIGH the buzzer is OFF
-If Out is LOW the Buzzer is ON
 //
 //
 Wire Joystick::
@@ -147,8 +145,7 @@ Small LED to show backup data being saved to SD Card
 //
 // Alarm Clock::
 //
-// flag to show an alarm has been set
-  volatile boolean alarmSet = false;
+  volatile boolean alarmSet = false; // flag to show an alarm has been set
   volatile boolean alarmSetMinutes = true;
   boolean setMinutes = true; // flag to show whether to set minutes or hours
   String alarmThisTime = "";
@@ -171,7 +168,7 @@ Small LED to show backup data being saved to SD Card
   const char* newTimeTimer = "00:00";
   String thisTimeTimer = "";
 //
-// Buzzer::
+// Alarm Buzzer::
 //
   unsigned long buzzerPreviousMillis = 0; // will store last time LED was updated
   const long buzzerInterval = 1000;
@@ -354,13 +351,14 @@ void setup(void) {
   pinMode(12, OUTPUT);
   digitalWrite(12, LOW); // turn it off
   //
+  //
   // Buzzer
   pinMode(4, OUTPUT);
   digitalWrite(4, LOW);  // turn the buzzer ON briefly
   delay(200);
   digitalWrite(4, HIGH); // turn buzzer off
   delay(200);  
-  //  
+  // 
   // check for SD Card
   //
   pinMode(10, OUTPUT);  // needed to make the SD Library work
@@ -398,13 +396,13 @@ void setup(void) {
         ClockData.close();        
       }
     } 
-  if(sdPresent){  // second buzz  4
+  if(sdPresent){  // second buzz 
     digitalWrite(4, LOW); // turn on buzzer
     delay(200);
     digitalWrite(4, HIGH); // turn buzzer off 
     delay(200);    
     // look for a backup file
-    if(SD.exists("backup.dat")){ // 5       
+    if(SD.exists("backup.dat")){ //        
         Serial.println(F("Uploading Backup Data ...."));      
       
         if (!SD.exists("backup.dat")) {
@@ -652,15 +650,23 @@ void loop() {
     //
     printData(); // build temperature and pressure data strings
     // check for card, it may have been removed, then re-inserted
+  if (!SD.begin(53)){
+    // If there was an error output no card is present
+    Serial.println(F("No SD Card present"));
+    sdPresent = false; // show NO CARD present    
+  }
+  else{     
     if(SD.exists("data.csv")){ 
       ClockData = SD.open("data.csv", FILE_WRITE);
       Write(); // send data to SD Card if there is one present 
       ClockData.close(); // close the file    
     }
+  }
     if(SD.exists("backup.dat")){ 
-      SD.remove("backup.dat");  // delete old backup 
-      delay(50);   
+      //SD.remove("backup.dat");  // delete old backup 
+      //delay(50);   
       BackUp = SD.open("backup.dat", FILE_WRITE);
+      BackUp.seek(0); // rewind
       digitalWrite(12, HIGH); // turn on LED to show backup being written
       saveBackup(); // now save the backup file
       digitalWrite(12, LOW); // turn it off      
@@ -702,7 +708,7 @@ void loop() {
     }
   }  
   if (timeAlarmSet == false){ // allows the alarm to switch off by pressing joystick
-    digitalWrite(4, HIGH); // turn off buzzer
+    digitalWrite(4, HIGH); // turn off buzzer  
     digitalWrite(13, LOW); // turn off LED     
   }
 //
@@ -2181,3 +2187,4 @@ void drawTemperatureGraph(){
   u8g.drawLine(0,16,128,16); // 30 degrees C 
 }
 /**********************************************************/
+

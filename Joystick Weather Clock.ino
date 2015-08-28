@@ -36,7 +36,7 @@ Wire RTC::
   SDA Arduino Mega pin 20
   SCL Arduino Mega pin 21
 //
-//
+// 
 Wire OLED::
   VCC +5v
   GND GND

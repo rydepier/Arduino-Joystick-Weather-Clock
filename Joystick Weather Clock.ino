@@ -380,9 +380,9 @@ void setup(void) {
    else{ 
      Serial.println(F("data.csv does not exist, new file will be created..."));
      // Create a new text file on the SD card
-     //Serial.println("Creating data.csv");
+     Serial.println(F("Creating data.csv"));
      ClockData = SD.open("data.csv", FILE_WRITE);
-    // If the file was created ok then add come content
+     // If the file was created ok then add come content
       if (ClockData){
         ClockData.println(F("Joystick Weather Clock Data"));
         ClockData.println(F("Date,00:00,01:00,02:00,03:00,04:00,05:00,06:00,07:00,08:00,09:00,10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00,22:00,23:00,Time (hrs)"));
@@ -421,6 +421,7 @@ void setup(void) {
         }
        } 
      else{ // create new backup.dat and fill with blank data
+       Serial.println(F("Creating backup.dat"));    
        BackUp = SD.open("backup.dat", FILE_WRITE);
        for(int f = 0; f < 6;f++){
          BackUp.print(F("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\r\n"));
@@ -649,22 +650,16 @@ void loop() {
     recordNumber = recordNumber + 1; // increment the pointer
     //
     printData(); // build temperature and pressure data strings
-    // check for card, it may have been removed, then re-inserted
-  if (!SD.begin(53)){
-    // If there was an error output no card is present
-    Serial.println(F("No SD Card present"));
-    sdPresent = false; // show NO CARD present    
-  }
-  else{     
+    // if the card is removed it will not be recognised, press
+    // the Arduino reset button to re initiate the SD Card 
+    // the backup data will then be reloaded.  
     if(SD.exists("data.csv")){ 
       ClockData = SD.open("data.csv", FILE_WRITE);
       Write(); // send data to SD Card if there is one present 
       ClockData.close(); // close the file    
     }
-  }
+  //}
     if(SD.exists("backup.dat")){ 
-      //SD.remove("backup.dat");  // delete old backup 
-      //delay(50);   
       BackUp = SD.open("backup.dat", FILE_WRITE);
       BackUp.seek(0); // rewind
       digitalWrite(12, HIGH); // turn on LED to show backup being written
@@ -1859,9 +1854,9 @@ void monthRhyme(){
   const char*newRhyme3 = (const char*) rhymePart3.c_str();   
   u8g.drawStr(19,60, " by Sara Coleridge"); 
   u8g.setFont(u8g_font_profont12); 
-    u8g.drawStr(1,15, newRhyme1);
-    u8g.drawStr(1,30, newRhyme2); 
-    u8g.drawStr(1,45, newRhyme3); 
+  u8g.drawStr(1,15, newRhyme1);
+  u8g.drawStr(1,30, newRhyme2); 
+  u8g.drawStr(1,45, newRhyme3); 
 } 
 
 /*************************************************************/
@@ -2187,4 +2182,3 @@ void drawTemperatureGraph(){
   u8g.drawLine(0,16,128,16); // 30 degrees C 
 }
 /**********************************************************/
-

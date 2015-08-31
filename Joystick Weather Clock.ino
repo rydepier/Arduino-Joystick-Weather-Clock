@@ -36,7 +36,7 @@ Wire RTC::
   SDA Arduino Mega pin 20
   SCL Arduino Mega pin 21
 //
-// 
+//
 Wire OLED::
   VCC +5v
   GND GND
@@ -97,6 +97,8 @@ Small LED to show backup data being saved to SD Card
   int alarmHour = 7;
   int alarmMinute = 30;
   int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
+  int birthMonth = 6; // your birthday
+  int birthDay = 15; // your birthday
 //
 /**********************************************************************/
 // setup u8g object
@@ -820,10 +822,15 @@ void drawAnalog(void) {  // draws an analog clock face
   u8g.drawLine(64,32,x3,y3);
   //
   // display greeting
-  if (now.hour() >= 6 && now.hour() < 12){greetingTime = " Good Morning";}
-  if (now.hour() >= 12 && now.hour() < 17){greetingTime = "Good Afternoon";}
-  if (now.hour() >= 17 && now.hour() <= 23){greetingTime = " Good Evening";}
-  if (now.hour() >= 0 && now.hour() <= 5){greetingTime = "  Sleep well";}
+  if (now.month() == birthMonth && now.day() == birthDay){
+    greetingTime = "Happy Birthdy";
+  }
+  else{
+    if (now.hour() >= 6 && now.hour() < 12){greetingTime = " Good Morning";}
+    if (now.hour() >= 12 && now.hour() < 17){greetingTime = "Good Afternoon";}
+    if (now.hour() >= 17 && now.hour() <= 23){greetingTime = " Good Evening";}
+    if (now.hour() >= 0 && now.hour() <= 5){greetingTime = "  Sleep well";}
+  }
   u8g.setFont(u8g_font_profont15);
   u8g.drawStr(20,10, greetingTime);
   // show alarm state
@@ -1761,19 +1768,30 @@ void childDay(){
    newWeekStart = (28-startDay)+1;   
    // is is February?
    if(newWeekStart > 28 && now.month() == 2){
-   // do nothing unless its a leap year
+   // is it a leap year
      if (now.year()==(now.year()/4)*4){ // its a leap year
        week5 = "29";
-     }       
+     }  
    }
    else{ // print up to 30 anyway
-     for (f = newWeekStart; f < newWeekStart+7; f++){
-       week5 = week5 + String(f) + " ";
+     if(now.month() == 2){  // its February
+       for (f = newWeekStart; f < 29; f++){
+         week5 = week5 + String(f) + " ";  
+       }  
+       // is it a leap year
+       if (now.year()==(now.year()/4)*4){ // its a leap year
+         week5 = week5 + "29";
+       }        
      }
-     // are there 31 days
-     if (monthLength == 31 && week5.length() <7){
-       week5 = week5 + "31"; 
-     }  
+     else{
+       for (f = newWeekStart; f < newWeekStart+7; f++){
+         week5 = week5 + String(f) + " ";
+       }
+       // are there 31 days
+       if (monthLength == 31 && week5.length() <7){
+         week5 = week5 + "31"; 
+       } 
+     } 
    }
    const char* newWeek5 = (const char*) week5.c_str();  
    u8g.drawStr(2,59,newWeek5);
@@ -2107,16 +2125,6 @@ size_t readField(File* file, char* str, size_t size, char* delim) {
   }
 //
 /********************************************************/
-void drawBackup(){
-  u8g.setFont(u8g_font_profont12); 
-  u8g.drawStr(7,8, "Clock has re-booted");  
-  u8g.drawStr(2,30, "A backup is available");
-  u8g.drawStr(2,40, "This will be uploaded");
-  u8g.drawStr(2,50, "but data may be out");
-  u8g.drawStr(2,60, "of date!");  
-}
-
-/**********************************************************/
 void saveBackup(){
   // save this hours backup data to backup.dat 
   int j =0;
@@ -2182,3 +2190,4 @@ void drawTemperatureGraph(){
   u8g.drawLine(0,16,128,16); // 30 degrees C 
 }
 /**********************************************************/
+

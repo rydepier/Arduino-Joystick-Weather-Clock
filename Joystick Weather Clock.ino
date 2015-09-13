@@ -346,10 +346,10 @@ void setup(void) {
   // 
   pinMode(9, OUTPUT); // backlight1
   pinMode(10, OUTPUT); // backlight2
-  if(backlight1){digitalWrite(9, HIGH)}
-  else(digitalWrite(9, LOW}
-  if(backlight2){digitalWrite(10, HIGH)}
-  else(digitalWrite(10, LOW}  
+  if(backlight1){digitalWrite(9, HIGH);}
+  else{digitalWrite(9, LOW);}
+  if(backlight2){digitalWrite(10, HIGH);}
+  else{digitalWrite(10, LOW);}  
   u8g.firstPage();  
     do {
       splash(); 

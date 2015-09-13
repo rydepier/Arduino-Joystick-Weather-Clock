@@ -5,4 +5,4 @@ The main code contains connection details for the various sensors. There is a RT
 
 Pressure and temperature are plotted over a 24 hour period with 3 days worth of data stored and each 24 hour period can be displayed. Data is saved to an SD Card, which is then is loaded when the Arduino is powered up. The buzzer is used to show the presence of an SD Card and that the backup data being loaded.
 
-The SD Card can be removed to read the data, but when the card is removed it becomes un-mounted and will not remount when it is replaced. Press the Arduino Reset when the card is returned, this will remount the card and up;oad the stored data. If this is not done the data will not be written to the data files.
+The SD Card can be removed to read the data, but when the card is removed it becomes un-mounted and will not remount when it is replaced. Press the Arduino Reset when the card is returned, this will remount the card and upload the stored data. If this is not done the data will not be written to the data files.

@@ -17,7 +17,7 @@ Connections: (All Pins are for the Arduino MEGA)
 
 Wire Buzzer Alarm::
   Vcc connect to Arduino 5 volts
-  Input connect to Arduino pin 4
+  Input connect to BuzzerPin
   Gnd connect to Arduino Gnd
 
 //
@@ -25,8 +25,13 @@ Wire Buzzer Alarm::
 Wire Joystick::
   Gnd    ---> Arduino Gnd
   Vcc    ---> Arduino 5 volts
-  Xout   ---> Arduino A0
-  Yout   ---> Arduino A1
+  
+  Xout   ---> Arduino A0 with outpu pins on left
+  Yout   ---> Arduino A1 with output pins on left
+  
+  Xout   ---> Arduino A1 with outpu pins on top
+  Yout   ---> Arduino A0 with output pins on top  
+  
   Switch ---> Arduino Digital pin 2 (must be this pin for ISR to work)
 //
 //
@@ -76,7 +81,11 @@ Wire Resistors, 10k
   Digital Pin 2 to 5v (Joystick Switch)
 //
 Small LED to show backup data being saved to SD Card
-  Connect cathode to pin 12, then Anode via a resitor, 470R to Gnd
+  Connect cathode to blueLed, then Anode via a resitor, 470R to Gnd
+//
+2 x Small LED(blue) behind OLED as backlight if required
+  backlight1 cathode to pin 9 anode via a resitor, 470R to Gnd
+  backlight2 cathode to pin 10, anode via a resitor, 470R to Gnd
 //
 
 ************************************************************/
@@ -94,17 +103,24 @@ Small LED to show backup data being saved to SD Card
 // User can change the following  variables as required
 //
 // Alarm Clock
-  int alarmHour = 7;
-  int alarmMinute = 30;
+  int alarmHour = 7; // default alarm hour
+  int alarmMinute = 30; // default alarm minute
   int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
   int birthMonth = 6; // your birthday
   int birthDay = 15; // your birthday
+//
+//Backlighting for OLED
+  boolean backlight1 = true; // false = OFF
+  boolean backlight2 = true; // false = OFF
 //
 /**********************************************************************/
 // setup u8g object
   U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);	// I2C 
 //
-
+// Hardware Error check
+  boolean errorHardware1 = false;
+  boolean errorHardware2 = false;
+//
 // Setup RTC
   RTC_DS1307 RTC;
   static String monthString[12]= {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
@@ -143,6 +159,7 @@ Small LED to show backup data being saved to SD Card
   File BackUp; // text file on SD card
   String SDtemperature = ""; // build this string with current day temperature
   String SDpressure = ""; // and this one with pressure
+  int blueLed = 12; //LED used to show SD Card activity
 //
 //
 // Alarm Clock::
@@ -174,8 +191,8 @@ Small LED to show backup data being saved to SD Card
 //
   unsigned long buzzerPreviousMillis = 0; // will store last time LED was updated
   const long buzzerInterval = 1000;
-  int ledState = LOW;
-  int buzzerState = HIGH;
+  boolean ledState = false;
+  int buzzerPin = 4; // pin the buzzer is connected to
 //
 // Set start screen and maximum number of screens::
 //
@@ -327,15 +344,18 @@ void setup(void) {
   Serial.begin(9600);
   Wire.begin();
   // 
+  pinMode(9, OUTPUT); // backlight1
+  pinMode(10, OUTPUT); // backlight2
+  if(backlight1){digitalWrite(9, HIGH)}
+  else(digitalWrite(9, LOW}
+  if(backlight2){digitalWrite(10, HIGH)}
+  else(digitalWrite(10, LOW}  
   u8g.firstPage();  
     do {
       splash(); 
     } while( u8g.nextPage() );
   //  
   RTC.begin();
-  if (! RTC.isrunning()) {
-  // Serial.println(F("RTC is NOT running!"));
-  }
   // following line sets the RTC to the date & time this sketch was compiled  
   // un REM the line below to set clock, then re REM it
   // and upload this sketch again
@@ -347,19 +367,35 @@ void setup(void) {
   barometer.initialize();
   // verify connection
   Serial.println(F("Testing device connections..."));
+  if (! RTC.isrunning()) {
+   Serial.println(F("RTC is NOT running!"));
+   errorHardware1 = true;    
+  }
+  else{
+   Serial.println(F("RTC is running")); 
+   errorHardware1 = false;   
+  }    
   Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
+  if(barometer.testConnection()){
+    errorHardware2 = false;
+  }
+  else{
+    errorHardware2 = true;
+  }
   //
   // led used to show backup being written
-  pinMode(12, OUTPUT);
-  digitalWrite(12, LOW); // turn it off
+  pinMode(blueLed, OUTPUT);
+  digitalWrite(blueLed, HIGH); // turn on LED
+  delay(500); // test the blue led
+  digitalWrite(blueLed, LOW); // turn it off
   //
   //
-  // Buzzer
-  pinMode(4, OUTPUT);
-  digitalWrite(4, LOW);  // turn the buzzer ON briefly
+  // Buzzer 
+  pinMode(buzzerPin, OUTPUT); // output
+  digitalWrite(buzzerPin, LOW);  // turn the buzzer ON briefly
   delay(200);
-  digitalWrite(4, HIGH); // turn buzzer off
-  delay(200);  
+  digitalWrite(buzzerPin, HIGH); // turn buzzer off
+  delay(50);  
   // 
   // check for SD Card
   //
@@ -399,9 +435,9 @@ void setup(void) {
       }
     } 
   if(sdPresent){  // second buzz 
-    digitalWrite(4, LOW); // turn on buzzer
+    digitalWrite(buzzerPin, LOW); // turn on buzzer
     delay(200);
-    digitalWrite(4, HIGH); // turn buzzer off 
+    digitalWrite(buzzerPin, HIGH); // turn buzzer off 
     delay(200);    
     // look for a backup file
     if(SD.exists("backup.dat")){ //        
@@ -412,14 +448,14 @@ void setup(void) {
           Serial.println(F("Failed to open backup.dat"));
         }
         else{ 
-          digitalWrite(12, HIGH); // turn on LED to show backup being written          
+          digitalWrite(blueLed, HIGH); // turn on LED to show backup being written          
           // third beep
-          digitalWrite(4, LOW); // turn on buzzer
+          digitalWrite(buzzerPin, LOW); // turn on buzzer
           delay(200);
-          digitalWrite(4, HIGH); // turn buzzer off
+          digitalWrite(buzzerPin, HIGH); // turn buzzer off
           //           
           loadBackup();          
-          digitalWrite(12, LOW); // turn on LED to show backup being written
+          digitalWrite(blueLed, LOW); // turn on LED to show backup being written
         }
        } 
      else{ // create new backup.dat and fill with blank data
@@ -431,12 +467,13 @@ void setup(void) {
        BackUp.close();
      }
    } 
+  }   
   //
   // joystick
   pinMode(2, INPUT);
   // calibrate joystick
-  joyX = analogRead(A1); // midpoint for X
-  joyY = analogRead(A0); // midpoint for Y 
+  joyX = analogRead(A0); // midpoint for X // for pins on top
+  joyY = analogRead(A1); // midpoint for Y   
   // setup Interrupt Service Routine
   attachInterrupt(0,joySwitchISR,FALLING); // uses pin 2
   //
@@ -448,20 +485,26 @@ void setup(void) {
   //
   // on board LED
   pinMode(13, OUTPUT);
-  digitalWrite(13, LOW); // turn off LED//// clear the data strings
+  digitalWrite(13, LOW); // turn off LED
   //  
   // get initial time and recordPointer
   DateTime now = RTC.now();  // read the RTC 
-  recordPointer = now.hour();  
-  Serial.println(F("Clock now running ...."));
-  Serial.println(F(""));
+  recordPointer = now.hour(); 
+  if(errorHardware1 || errorHardware2){
+    Serial.println(F("One or more Hardware Errors, Clock will not start!"));
+    while(1); // stop 
+  }
+  else{
+    Serial.println(F("Clock now running ...."));
+    Serial.println(F(""));
+  }
   //
-  displayScreen = 0; // reset to home screen
-  } 
+  displayScreen = 0; // reset to home screen 
 } 
 /*******************************************************/
 
 void loop() {
+  
 //
 /* see which screen to display**************************/
 //
@@ -664,9 +707,9 @@ void loop() {
     if(SD.exists("backup.dat")){ 
       BackUp = SD.open("backup.dat", FILE_WRITE);
       BackUp.seek(0); // rewind
-      digitalWrite(12, HIGH); // turn on LED to show backup being written
+      digitalWrite(blueLed, HIGH); // turn on LED to show backup being written
       saveBackup(); // now save the backup file
-      digitalWrite(12, LOW); // turn it off      
+      digitalWrite(blueLed, LOW); // turn it off      
       BackUp.close(); // close the file
     }
     else{
@@ -681,48 +724,53 @@ void loop() {
   } 
 
  //* check to see if the clock alarm time has been reached ************
-  if (timeAlarmSet == true) {
-    if(alarmHour == now.hour() && alarmMinute == now.minute() && now.second() < maxAlarmTime){    
+  if (timeAlarmSet == true) {   
+    if(alarmHour == now.hour() && alarmMinute == now.minute() && now.second() < maxAlarmTime){   
       unsigned long buzzerCurrentMillis = millis();
       if(buzzerCurrentMillis - buzzerPreviousMillis >= buzzerInterval) {
         buzzerPreviousMillis = buzzerCurrentMillis;   
-        if (ledState == LOW){
-          ledState = HIGH;
-          buzzerState = LOW;
+        if (ledState == true){
+          ledState = false;
+          digitalWrite(13, HIGH); 
+          digitalWrite(buzzerPin, LOW);   // sound buzzer
         }
         else{
-          ledState = LOW;
-          buzzerState = HIGH;
+          ledState = true;
+          digitalWrite(13, LOW); 
+          digitalWrite(buzzerPin, HIGH);   // sound buzzer
         } 
-        digitalWrite(13, ledState); 
-        digitalWrite(4, buzzerState);   // sound buzzer
       }
     }
-    else{
-      timeAlarmSet == false; // make sure alarm is switched off at the end of the alarm time
-      digitalWrite(4, HIGH); // turn off buzzer
-      digitalWrite(13, LOW); // turn off LED        
-    }
-  }  
+  }
+  // make sure the alarm switches off at the end of the alarm period
+  if(alarmHour == now.hour() && alarmMinute == now.minute() && now.second() > maxAlarmTime){
+    ledState = false;
+    digitalWrite(buzzerPin, HIGH); // turn off buzzer  
+    digitalWrite(13, LOW); // turn off LED 
+  }
+  
   if (timeAlarmSet == false){ // allows the alarm to switch off by pressing joystick
-    digitalWrite(4, HIGH); // turn off buzzer  
+    ledState = false;
+    digitalWrite(buzzerPin, HIGH); // turn off buzzer  
     digitalWrite(13, LOW); // turn off LED     
   }
 //
 /* read the joystick************************************/
 //
  // reset joystick
-  if(analogRead(A1) < (joyX + 100) && analogRead(A1) > (joyX - 100)){
+  if(analogRead(A0) > (joyX - 150) && analogRead(A0) < (joyX + 150)){
     interrupt_time1 = millis();
-    if (interrupt_time1 - last_interrupt_time1 >200) {  // debounce delay            
+    if (interrupt_time1 - last_interrupt_time1 >200) {  // debounce delay   
       xValid = true;
     }
      last_interrupt_time1 = interrupt_time1;           
   }
  // 
  // read joystick moving to right
-  if(xValid == true){// allow reading to stabilise 
-    if(analogRead(A1) > (joyX + 100)) {
+  if(xValid == true){ // allow reading to stabilise 
+  // output pins on left
+  //if(analogRead(A1) > (joyX + 150)) { 
+    if(analogRead(A0) < (joyX - 150)) {  // output pins on top  
       xValid = false; // wait for the joystick to be released
       // reset displayScreen if additional screens were selected
      if(displayScreen == 12 || displayScreen == 13){
@@ -751,7 +799,9 @@ void loop() {
 //
 // read joystick moving to left
   if(xValid == true){
-    if(analogRead(A1) < (joyX - 50)) {
+    // output pins on left
+    //if(analogRead(A1) < (joyX - 150)) { 
+    if(analogRead(A0) > (joyX + 150)) { // output pins on top 
       xValid = false; // wait for the joystick to be released
      // reset displayScreen if additional screens were selected
      if(displayScreen == 12 || displayScreen == 13){
@@ -776,7 +826,7 @@ void loop() {
      }      
      resetFlags();
     }
-  }       
+  } 
 } // end of the main loop
 
 /*Screen 1 - Analog Clock*************************************/
@@ -918,7 +968,7 @@ void drawDigital(){
    }    
    // read Y joystick moving up and down
    // read joystick moving down
-   if(analogRead(A0) > (joyY + 300)) { 
+   if(analogRead(A1) > (joyY + 300)) {       
      interrupt_time2 = millis();
      if (interrupt_time2 - last_interrupt_time2 >800) { 
        // set minutes
@@ -940,7 +990,7 @@ void drawDigital(){
    }
  //
  // read joystick moving up
-   if(analogRead(A0) < (joyY - 300)) {   
+   if(analogRead(A1) < (joyY - 300)) {   
      interrupt_time2 = millis();
      if (interrupt_time2 - last_interrupt_time2 >800) { // slow things down
        // set minutes
@@ -969,7 +1019,7 @@ void drawTimer(){
   u8g.drawStr(45,10, "Timer:");  
  // 
   if (buttonFlag == false){  
-    digitalWrite(4, HIGH); // turn buzzer off     
+    digitalWrite(buzzerPin, HIGH); // turn buzzer off     
     u8g.drawStr(20,60, "CLICK to Start");   
     u8g.setFont(u8g_font_profont29);
     u8g.drawStr(25,40, newTimeTimer);
@@ -983,35 +1033,36 @@ void drawTimer(){
       previousMillis = currentMillis;        
       timerSecs = timerSecs + 1; 
       if(timerSecs >1){
-        digitalWrite(4, HIGH); // turn buzzer off         
+        digitalWrite(buzzerPin, HIGH); // turn buzzer off         
       }      
       if (timerSecs == 60){ 
         timerSecs = 0;  
         timerMins = timerMins + 1;
         if(int(timerMins/10)*10 == timerMins){  // once every 10 min
-          digitalWrite(4, LOW); // turn buzzer on`           
-        }
-        if (timerMins >= 99){
-          buttonFlag = false; // stop counting
-          // sound buzzer twice
-          digitalWrite(4, LOW); // turn on buzzer
-          delay(200);
-          digitalWrite(4, HIGH); // turn buzzer off  
-          delay(200); 
-          digitalWrite(4, LOW); // turn on buzzer
-          delay(200);
-          digitalWrite(4, HIGH); // turn buzzer off          
+          digitalWrite(buzzerPin, LOW); // turn buzzer on`           
         }
       }  
-    }  
-  // now format the time string  
-  thisTimeTimer = String(timerSecs);
-  if (timerSecs < 10){thisTimeTimer = "0" + thisTimeTimer;} 
-  thisTimeTimer = String(timerMins) + ":" + thisTimeTimer;
-  if (timerMins < 10){ thisTimeTimer= "0" + thisTimeTimer;} // add leading zero if required           
-  newTimeTimer = (const char*) thisTimeTimer.c_str();
-  u8g.setFont(u8g_font_profont29);   
-  u8g.drawStr(25,40, newTimeTimer);   
+    } 
+    if (timerMins >= 99 && timerSecs > 0){ // beep twice when the timer reaches 99 mins
+      timerSecs = 0;
+      buttonFlag = false; // stop counting
+      // sound buzzer twice
+      digitalWrite(buzzerPin, LOW); // turn on buzzer
+      delay(200);
+      digitalWrite(buzzerPin, HIGH); // turn buzzer off  
+      delay(200); 
+      digitalWrite(buzzerPin, LOW); // turn on buzzer
+      delay(200);
+      digitalWrite(buzzerPin, HIGH); // turn buzzer off          
+    }    
+    // now format the time string  
+    thisTimeTimer = String(timerSecs);
+    if (timerSecs < 10){thisTimeTimer = "0" + thisTimeTimer;} 
+    thisTimeTimer = String(timerMins) + ":" + thisTimeTimer;
+    if (timerMins < 10){ thisTimeTimer= "0" + thisTimeTimer;} // add leading zero if required           
+    newTimeTimer = (const char*) thisTimeTimer.c_str();
+    u8g.setFont(u8g_font_profont29);   
+    u8g.drawStr(25,40, newTimeTimer); 
   }
 }
 

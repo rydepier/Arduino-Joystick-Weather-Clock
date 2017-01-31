@@ -2,6 +2,11 @@
 Joystick controlled Clock using OLED Display
 by Chris Rouse August 2015
 
+Sketch updated February to include a Humidity Sensor DHT11 or DHT22
+A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
+
+The GitHub page contains all the libraries used with this project
+
 This sketch uses an Arduino Mega to provide more memory
 
 The program uses 73% of dynamic memory.
@@ -41,6 +46,10 @@ Wire RTC::
   SDA Arduino Mega pin 20
   SCL Arduino Mega pin 21
 //
+Wire DHT11 humidity Sensor
+ VCC +5v
+ OUT Arduino pin 2
+ GND GND
 //
 Wire OLED::
   VCC +5v
@@ -80,24 +89,25 @@ Wire Logic Level Converter::
 Wire Resistors, 10k
   Digital Pin 2 to 5v (Joystick Switch)
 //
-Small LED to show backup data being saved to SD Card
-  Connect cathode to blueLed, then Anode via a resitor, 470R to Gnd
+Small LED (green) to show backup data being saved to SD Card
+  Connect cathode to pin 49 (blueLed variable), then Anode via a resitor, 470R to Gnd
 //
 2 x Small LED(blue) behind OLED as backlight if required
-  backlight1 cathode to pin 9 anode via a resitor, 470R to Gnd
-  backlight2 cathode to pin 10, anode via a resitor, 470R to Gnd
+  backlight1 cathode to 5 volts, anode via a resitor, 470R to Gnd
+  backlight2 cathode to 5 volts, anode via a resitor, 470R to Gnd
 //
 
 ************************************************************/
 
 // Add libraries
-  #include "U8glib.h"  // graphics library
-  #include <SPI.h> // used in SPI interface
-  #include <Wire.h>  // used in SPI interface
-  #include "RTClib.h"  // Real time clock
-  #include "I2Cdev.h" // needed with BMP085.h
   #include "BMP085.h"  // pressure sensor
+  #include <dht11.h> // Humidity Sensor
+  #include "I2Cdev.h" // needed with BMP085.h
+  #include "RTClib.h"  // Real time clock
   #include <SD.h>  //SD Card
+  #include <SPI.h> // used in SPI interface
+  #include "U8glib.h"  // graphics library
+  #include <Wire.h>  // used in SPI interface
   //
 /**********************************************************************/  
 // User can change the following  variables as required
@@ -105,118 +115,128 @@ Small LED to show backup data being saved to SD Card
 // Alarm Clock
   int alarmHour = 7; // default alarm hour
   int alarmMinute = 30; // default alarm minute
-  int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
-  int birthMonth = 6; // your birthday
   int birthDay = 15; // your birthday
-//
-//Backlighting for OLED
-  boolean backlight1 = true; // false = OFF
-  boolean backlight2 = true; // false = OFF
+  int birthMonth = 6; // your birthday
+  int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
 //
 /**********************************************************************/
 // setup u8g object
   U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);	// I2C 
 //
 // Hardware Error check
-  boolean errorHardware1 = false;
-  boolean errorHardware2 = false;
+  boolean errorHardware1 = false; // RealTime Clock
+  boolean errorHardware2 = false; // Pressure Sensor
+  boolean errorHardware3 = false; // Humidity Sensor
+//
+// setup DHT11 Humidity Sensor
+  dht11 DHT11;
+  #define DHT11PIN 12
+  int checkDHT11; // used to confirm reading OK
+  int dewPointValue = 0;
+  const char* greetingHumidity = "";
+  boolean humidityUpdate = false; // shows if humidity was manually updated
+  float humidityValue = 0.0;
+  String thisDewPoint = "";
+  String thisHumidity = "";
 //
 // Setup RTC
   RTC_DS1307 RTC;
   static String monthString[12]= {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-  String thisMonth = "";
-  String thisTime = "";
   String thisDay="";
+  String thisMonth = "";
+  String thisTime = ""; 
   String thisWeekday ="";
 //
 // setup BMP180
   BMP085 barometer;
-  int temperature;
-  float pressure;
-  String thisPressure = "Waiting for Data";
-  String thisTemperature = "Waiting for Data";
-  int showData = 1; // used to show data screen 1 = now, 2 = -24hrs, 3 = -48hrs
-  double localTemp = 0.00;
-  double localTempF = 0.00; // temp in Farenheit
-  double localPressure = 0.00;
+  boolean grabFlag = false; // used to ensure only 1 reading is taken
   float lastPressure1 = 0.00;
   float lastPressure2 = 0.00; 
-  boolean showC = true;  // if false show temp in Farenheit
-  boolean switchForecast = false; // if false then current forecast shown
+  double localPressure = 0.00;
+  double localTemp = 0.00;
+  double localTempF = 0.00; // temp in Farenheit
   boolean pascal = false; // flag to show if pascals should be shown
-  boolean grabFlag = false; // used to ensure only 1 reading is taken
+  float pressure;
+  boolean showC = true;  // if false show temp in Farenheit
+  int showData = 1; // used to show data screen 1 = now, 2 = -24hrs, 3 = -48hrs
+  boolean switchForecast = false; // if false then current forecast shown
+  int temperature;
+  String thisPressure = "Waiting for Data";
+  String thisTemperature = "Waiting for Data";
   //
-  // Data strings, used to store temperature and pressure for 48 hours
-  float recordDataTemp[3][25];
-  float recordDataPressure[3][25];  
-  int recordPointer = 0; // points to current entry in record
+  // Data strings, used to store temperature and pressure for 48 hour
+  //
   boolean doOnce = false; // only let temperature be read once for logging
+  float recordDataPressure[3][25];  // array to hold Pressure data
+  float recordDataTemp[3][25]; // array to hold temperature data
   int recordNumber = 0; // counts data entries in current 24 hours
+  int recordPointer = 0; // points to current entry in record
 //
 // SD Card
-  boolean sdPresent = false; // flag to show data can be written to SD Card
-  File ClockData; // text file on SD Card
   File BackUp; // text file on SD card
+  int blueLed = 49; //LED used to show SD Card activity
+  File ClockData; // text file on SD Card
+  boolean sdPresent = false; // flag to show data can be written to SD Card
+  String SDpressure = ""; // and this one with pressure  
   String SDtemperature = ""; // build this string with current day temperature
-  String SDpressure = ""; // and this one with pressure
-  int blueLed = 12; //LED used to show SD Card activity
 //
 //
 // Alarm Clock::
 //
   volatile boolean alarmSet = false; // flag to show an alarm has been set
   volatile boolean alarmSetMinutes = true;
-  boolean setMinutes = true; // flag to show whether to set minutes or hours
   String alarmThisTime = "";
+  boolean setMinutes = true; // flag to show whether to set minutes or hours
+  
 //
 // joystick::
 //
 // calibrate joystick
+  volatile boolean buttonFlag = false; 
   int joyX = 0;
-  int joyY = 0;  
   boolean xValid = true;
+  int joyY = 0;  
   boolean yValid = false;
-  volatile boolean buttonFlag = false;  
 //
 // timer::
 //
-  int timerSecs = 0;
-  int timerMins = 0; 
-  unsigned long previousMillis = 0; 
-  long interval = 1000;  
+  long interval = 1000; 
   const char* newTimeTimer = "00:00";
+  unsigned long previousMillis = 0;
   String thisTimeTimer = "";
+  int timerMins = 0;
+  int timerSecs = 0;
 //
 // Alarm Buzzer::
 //
-  unsigned long buzzerPreviousMillis = 0; // will store last time LED was updated
   const long buzzerInterval = 1000;
-  boolean ledState = false;
   int buzzerPin = 4; // pin the buzzer is connected to
+  unsigned long buzzerPreviousMillis = 0; // will store last time LED was updated
+  boolean ledState = false;
 //
 // Set start screen and maximum number of screens::
 //
   volatile int displayScreen = 0; // screen number to start at
-  int screenMax = 11; // highest screen number
+  int screenMax = 12; // highest screen number (starts at 0)
 //
 // general delay::
 //
-  unsigned long lastMicros = 0; // used in BMP180 read routine
-  unsigned long last_interrupt_time2 = 0;
+  unsigned long interrupt_time1 = 0;
   unsigned long interrupt_time2 = 0;  
   unsigned long last_interrupt_time1 = 0;
-  unsigned long interrupt_time1 = 0;
+  unsigned long last_interrupt_time2 = 0;
+  unsigned long lastMicros = 0; // used in BMP180 read routine
 //
 // Weather Forecast
-  String thisForecast = ""; // forecast based on last hour
   String longForecast = "";  // forecast based on last 2 hours
   String rise = "constant";
   float riseAmmount = 0; // ammount of rise or fall in mb
+  String thisForecast = ""; // forecast based on last hour
 //
 // analog and digital clock displays::
 //
-  const char* greetingTime = "";
   const char* greetingTemp = "";
+  const char* greetingTime = "";
   volatile boolean timeAlarmSet = false;
 //
 // random number
@@ -224,16 +244,16 @@ Small LED to show backup data being saved to SD Card
 //
 // calendar::
 //
+  int newWeekStart = 0; // used to show start of next week of the month
+  int monthLength = 0;
+  boolean rhymeFlag = false; // used to show day rhyme screen if true
+  boolean rhymeMonthFlag = false; // used to show month rhyme if true
   int startDay = 0; // Sunday's value is 0, Saturday is 6
   String week1 ="";
   String week2 ="";
   String week3 ="";
   String week4 ="";
-  String week5 ="";
-  int newWeekStart = 0; // used to show start of next week of the month
-  int monthLength = 0;
-  boolean rhymeFlag = false; // used to show day rhyme screen if true
-  boolean rhymeMonthFlag = false; // used to show month rhyme if true
+  String week5 =""; 
 //
 // moon phase
 static unsigned char full_moon_bits[] = {
@@ -339,17 +359,14 @@ static unsigned char waxing_gibbous_bits[] = {
 /********************************************************/
 
 void setup(void) {  
-  // the buzzer will sound twice if an SD card is present and working OK
-  // otherwise it will only sound once
+  // The buzzer will sound once with a pause then
+  // three times if an SD card and DHT11  and BMP180 are present and working OK
+  // 
   Serial.begin(9600);
   Wire.begin();
-  // 
-  pinMode(9, OUTPUT); // backlight1
-  pinMode(10, OUTPUT); // backlight2
-  if(backlight1){digitalWrite(9, HIGH);}
-  else{digitalWrite(9, LOW);}
-  if(backlight2){digitalWrite(10, HIGH);}
-  else{digitalWrite(10, LOW);}  
+  //
+  pinMode(buzzerPin, OUTPUT); // output
+  //
   u8g.firstPage();  
     do {
       splash(); 
@@ -383,19 +400,22 @@ void setup(void) {
     errorHardware2 = true;
   }
   //
+  //check presence of DHTll
+  getHumidity(); // check the Humidity sensor
+  if(errorHardware3 == false){
+    Serial.println("DHT11 reading OK");
+    buzzer();
+  }
+  else{
+    Serial.println("There is a problem with the DHT11 Humidity Sensor");
+  }
   // led used to show backup being written
   pinMode(blueLed, OUTPUT);
   digitalWrite(blueLed, HIGH); // turn on LED
   delay(500); // test the blue led
   digitalWrite(blueLed, LOW); // turn it off
   //
-  //
-  // Buzzer 
-  pinMode(buzzerPin, OUTPUT); // output
-  digitalWrite(buzzerPin, LOW);  // turn the buzzer ON briefly
-  delay(200);
-  digitalWrite(buzzerPin, HIGH); // turn buzzer off
-  delay(50);  
+  buzzer();  
   // 
   // check for SD Card
   //
@@ -434,11 +454,8 @@ void setup(void) {
         ClockData.close();        
       }
     } 
-  if(sdPresent){  // second buzz 
-    digitalWrite(buzzerPin, LOW); // turn on buzzer
-    delay(200);
-    digitalWrite(buzzerPin, HIGH); // turn buzzer off 
-    delay(200);    
+  if(sdPresent){  //  buzz 
+    buzzer();   
     // look for a backup file
     if(SD.exists("backup.dat")){ //        
         Serial.println(F("Uploading Backup Data ...."));      
@@ -603,21 +620,30 @@ void loop() {
      do {
        drawCalendar(); 
      } while( u8g.nextPage() ); 
+     break; 
+     //
+     case 12:
+      // humidity display
+     greetingTemp = "Click for update";
+     u8g.firstPage();      
+     do {
+       drawHumidity(); 
+     } while( u8g.nextPage() ); 
      break;             
   } // end of switch loop
  // 
  // check if additional screens have been selected
  //
-  if(displayScreen > 11){
+  if(displayScreen > 12){
     switch(displayScreen){
-      case 12:
+      case 13:
         // show data from 24 hours ago
         u8g.firstPage();      
         do {
           plotPressure_24(); //  pressure data from 24 hours ago
         } while( u8g.nextPage() ); 
       break;
-      case 13:
+      case 14:
         // show data from 36 hours ago
         u8g.firstPage();      
         do {
@@ -625,35 +651,35 @@ void loop() {
         } while( u8g.nextPage() ); 
       break; 
       // additional temperature screens
-      case 14:
+      case 15:
         // show data from 24 hours ago
         u8g.firstPage();      
         do {
           plotTemperature_24(); //  temperature data from 24 hours ago
         } while( u8g.nextPage() ); 
       break;
-      case 15:
+      case 16:
         // show data from 36 hours ago
         u8g.firstPage();      
         do {
           plotTemperature_48(); // temperature data from 48 hours ago
         } while( u8g.nextPage() );   
       break;  
-      case 16:
+      case 17:
        // name the moon for each momth
         u8g.firstPage();      
         do {
           nameMoon(); // names the full moon
         } while( u8g.nextPage() );     
       break;
-      case 17:
+      case 18:
        // day rhyme
         u8g.firstPage();      
         do {
           childDay(); // rhyme for the day
         } while( u8g.nextPage() );     
       break;    
-      case 18:
+      case 19:
        // month rhyme
         u8g.firstPage();      
         do {
@@ -679,7 +705,7 @@ void loop() {
     grabFlag = true;
   } 
  //
- // grab a temperature and pressure reading at the top of each hour
+ // grab a temperature, humidity and pressure reading at the top of each hour
  //
   if(now.minute() == 0 && now.second() == 0  && doOnce == false){  
     // reset data at midnight  
@@ -687,6 +713,7 @@ void loop() {
       resetDataStrings();     
     }
     //
+    getHumidity(); // read the current value
     recordPointer = now.hour();
     recordDataTemp[0][recordPointer] = localTemp;
     recordDataTemp[0][24] = recordPointer; // save the pointer
@@ -694,7 +721,7 @@ void loop() {
     recordDataPressure[0][24] = recordPointer; // save the pointer
     recordNumber = recordNumber + 1; // increment the pointer
     //
-    printData(); // build temperature and pressure data strings
+    printData(); // build temperature, humidity and pressure data strings
     // if the card is removed it will not be recognised, press
     // the Arduino reset button to re initiate the SD Card 
     // the backup data will then be reloaded.  
@@ -771,21 +798,25 @@ void loop() {
   // output pins on left
   //if(analogRead(A1) > (joyX + 150)) { 
     if(analogRead(A0) < (joyX - 150)) {  // output pins on top  
+      greetingHumidity = "Click to Update";
       xValid = false; // wait for the joystick to be released
       // reset displayScreen if additional screens were selected
-     if(displayScreen == 12 || displayScreen == 13){
+      if(displayScreen == 12){
+        humidityUpdate = false;
+      }
+     if(displayScreen == 13 || displayScreen == 14){
        displayScreen = 5;
      }
-     if(displayScreen == 14 || displayScreen == 15){
+     if(displayScreen == 15 || displayScreen == 16){
        displayScreen = 8;
      }  
-     if(displayScreen == 16){
+     if(displayScreen == 17){
        displayScreen = 9;
      }  
-     if(displayScreen == 17){
+     if(displayScreen == 18){
        displayScreen = 10; 
      }  
-     if(displayScreen == 18){
+     if(displayScreen == 19){
        displayScreen = 11; 
      }         
      //         
@@ -804,19 +835,20 @@ void loop() {
     if(analogRead(A0) > (joyX + 150)) { // output pins on top 
       xValid = false; // wait for the joystick to be released
      // reset displayScreen if additional screens were selected
-     if(displayScreen == 12 || displayScreen == 13){
+     greetingHumidity = "Click to Update";
+     if(displayScreen == 13 || displayScreen == 14){
        displayScreen = 5;
      }
-     if(displayScreen == 14 || displayScreen == 15){
+     if(displayScreen == 15 || displayScreen == 16){
        displayScreen = 8;
      }  
-     if(displayScreen == 16){
+     if(displayScreen == 17){
        displayScreen = 9; 
      } 
-     if(displayScreen == 17){
+     if(displayScreen == 18){
        displayScreen = 10; 
      }      
-     if(displayScreen == 18){
+     if(displayScreen == 19){
        displayScreen = 11; 
      }         
      //       
@@ -1019,7 +1051,8 @@ void drawTimer(){
   u8g.drawStr(45,10, "Timer:");  
  // 
   if (buttonFlag == false){  
-    digitalWrite(buzzerPin, HIGH); // turn buzzer off     
+    digitalWrite(buzzerPin, HIGH); // turn buzzer off
+    digitalWrite(8, LOW); // led off   
     u8g.drawStr(20,60, "CLICK to Start");   
     u8g.setFont(u8g_font_profont29);
     u8g.drawStr(25,40, newTimeTimer);
@@ -1028,18 +1061,26 @@ void drawTimer(){
   }
   else{
     u8g.drawStr(20,60, "CLICK to Stop");
-    unsigned long currentMillis = millis();
+    unsigned long currentMillis = millis();     
     if(currentMillis - previousMillis >= interval) {
       previousMillis = currentMillis;        
       timerSecs = timerSecs + 1; 
+      if(timerSecs >0){  
+        digitalWrite(blueLed, LOW);        
+      }          
       if(timerSecs >1){
-        digitalWrite(buzzerPin, HIGH); // turn buzzer off         
+        digitalWrite(buzzerPin, HIGH); // turn buzzer off       
       }      
-      if (timerSecs == 60){ 
+      if (timerSecs == 60){
+      digitalWrite(blueLed, HIGH);        
         timerSecs = 0;  
         timerMins = timerMins + 1;
         if(int(timerMins/10)*10 == timerMins){  // once every 10 min
-          digitalWrite(buzzerPin, LOW); // turn buzzer on`           
+          digitalWrite(buzzerPin, LOW); // turn buzzer on`
+          digitalWrite(blueLed, HIGH); 
+          delay(200);
+          digitalWrite(buzzerPin, HIGH); // turn buzzer off`
+          digitalWrite(blueLed, LOW);           
         }
       }  
     } 
@@ -1048,12 +1089,16 @@ void drawTimer(){
       buttonFlag = false; // stop counting
       // sound buzzer twice
       digitalWrite(buzzerPin, LOW); // turn on buzzer
+      digitalWrite(blueLed, HIGH);       
       delay(200);
       digitalWrite(buzzerPin, HIGH); // turn buzzer off  
+      digitalWrite(blueLed, LOW);       
       delay(200); 
       digitalWrite(buzzerPin, LOW); // turn on buzzer
+      digitalWrite(blueLed, HIGH);       
       delay(200);
-      digitalWrite(buzzerPin, HIGH); // turn buzzer off          
+      digitalWrite(buzzerPin, HIGH); // turn buzzer off 
+      digitalWrite(blueLed, LOW);       
     }    
     // now format the time string  
     thisTimeTimer = String(timerSecs);
@@ -1137,10 +1182,9 @@ void plotPressure(){
      u8g.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
    }
 }
-/**************************************************************/
+/*Screen 14 = Plot Pressure - 24 hours*************************************************************/
 void plotPressure_24(){
  // displays a plot of the pressure from Yesterday
- // Screen 11
  // 
    double tempYvalueP;    
    double tempYvalue;   
@@ -1162,10 +1206,9 @@ void plotPressure_24(){
        u8g.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
      }
 }
-/**************************************************************/
+/*Screen 15 = Plot Pressure = 48 hours*************************************************************/
 void plotPressure_48(){
   // displays a plot of the pressure from day before Yesterday
-  // Screen 12
   //  
   double tempYvalueP;    
   double tempYvalue;    
@@ -1373,8 +1416,9 @@ void plotTemperature(){
       }
    }
 }
-/********************************************************/ 
+/*Screen 16 - Plot Temperature - 24*******************************************************/ 
 void plotTemperature_24(){
+  // 
   // displays a plot of the temperature over the last 24 hours
   double tempYvalueP;    
   double tempYvalue;    
@@ -1398,7 +1442,7 @@ void plotTemperature_24(){
     }
   }
 }
-/********************************************************/ 
+/*Screen 17 - Plot Temperature  - 48 hours*******************************************************/ 
 void plotTemperature_48(){
   // displays a plot of the temperature over the last 24 hours
   double tempYvalueP;    
@@ -1511,7 +1555,7 @@ double julianDate(int y, int m, int d){
   return j;
 }
 
-/*Screen 16 - Name of Moon*****************************************************/
+/*Screen 18 - Name of Moon*****************************************************/
 void nameMoon(){
   // names the moon each month, selects a random version each time
   DateTime now = RTC.now();  
@@ -1672,7 +1716,7 @@ void nameMoon(){
   u8g.drawCircle(37,10,3);
   u8g.drawCircle(87,10,3);  
  }
-/*Screen 17 - Show day with childs attitude*****************************/  
+/*Screen 19 - Show day with childs attitude*****************************/  
 void childDay(){
   // show the child born on day
   DateTime now = RTC.now(); // get date
@@ -1847,7 +1891,7 @@ void childDay(){
    const char* newWeek5 = (const char*) week5.c_str();  
    u8g.drawStr(2,59,newWeek5);
  } 
-/**************************************************************/
+/*Screen 20 - Month Rhyme*************************************************************/
 void monthRhyme(){
   // show the child born on day
   DateTime now = RTC.now(); // get date
@@ -1928,7 +1972,39 @@ void monthRhyme(){
   u8g.drawStr(1,45, newRhyme3); 
 } 
 
+/*Screen 13 - Humidity*******************************************************/
+//
+void drawHumidity(){
+  // displays local Humidity
+  if(humidityUpdate == true){
+    getHumidity(); // update if the joystick was pressed
+    humidityUpdate = false;
+  }
+  u8g.setFont(u8g_font_profont15);
+  u8g.drawStr(25,10, " Humidity:");
+  //
+  if(errorHardware3 == false){
+    thisHumidity = String(int(humidityValue)) + "%"; // displays percentage symbol
+  }
+  else{
+    thisHumidity = "--"; // problem with reading
+  }
+  const char* newHumidity = (const char*) thisHumidity.c_str();
+  u8g.setFont(u8g_font_profont29);    
+  u8g.drawStr(35,40, newHumidity);  
+  //
+  u8g.setFont(u8g_font_profont15);
+  u8g.drawStr(10,60, greetingHumidity);
+  // now add dewpoint
+  u8g.setFont(u8g_font_profont12);
+  u8g.drawStr(100,20, "Dew");
+  u8g.drawStr(95,30, "Point");
+  thisDewPoint = String(dewPointValue) +  "\260C";
+  const char* newDewPoint = (const char*) thisDewPoint.c_str();
+  u8g.drawStr(100,43,  newDewPoint);
+}
 /*************************************************************/
+
 //
 // Sub Routines and Functions
 //
@@ -1958,7 +2034,7 @@ int j = 0;
    for(int f = 0; f<25;f++){
      SDtemperature = SDtemperature + String(recordDataTemp[0][f]);
      if(f <24){
-       SDtemperature = SDtemperature + ","; // dont pur a comma after the last value
+       SDtemperature = SDtemperature + ","; // dont put a comma after the last value
      }
      SDpressure = SDpressure + String(recordDataPressure[0][f]); 
      if(f <24){
@@ -1971,6 +2047,7 @@ void joySwitchISR(){
   // includes a debounce routine
   static unsigned long last_interrupt_time = 0;
   unsigned long interrupt_time = millis();
+  //Serial.println(displayScreen); // Un REM to debug
   if (interrupt_time - last_interrupt_time >500) { 
     if (displayScreen == 0 || displayScreen == 1){
       timeAlarmSet = !timeAlarmSet; // change alarm state
@@ -1985,7 +2062,7 @@ void joySwitchISR(){
       buttonFlag = !buttonFlag;      
     }
     //   
-    if(displayScreen == 5 || displayScreen  == 12 || displayScreen == 13){
+    if(displayScreen == 5 || displayScreen  == 13 || displayScreen == 14){
       // button pressed on plot screens
       showData = showData + 1;
       if(showData > 3){
@@ -1995,10 +2072,10 @@ void joySwitchISR(){
         displayScreen =5;
       }
       if(showData ==2){
-        displayScreen =12;
+        displayScreen =13;
       }
        if(showData ==3){
-        displayScreen =13;
+        displayScreen =14;
       }     
     }
     //
@@ -2010,7 +2087,7 @@ void joySwitchISR(){
       showC = ! showC; // switch between C and F
     }    
     // 
-    if(displayScreen == 8 || displayScreen  == 14 || displayScreen == 15){
+    if(displayScreen == 8 || displayScreen  == 15 || displayScreen == 16){
       // button pressed on plot screens
       showData = showData + 1;
       if(showData > 3){
@@ -2020,45 +2097,51 @@ void joySwitchISR(){
         displayScreen = 8;
       }
       if(showData == 2){
-        displayScreen = 14;
+        displayScreen = 15;
       }
        if(showData == 3){
-        displayScreen = 15;
+        displayScreen = 16;
       }     
     }
     if(displayScreen == 4){
       pascal = !pascal;
     }
-    if(displayScreen == 9 || displayScreen  == 16 ){
+    if(displayScreen == 9 || displayScreen  == 17 ){
       // button pressed on moon screen
       moonName = !moonName;
       if(moonName){
-        displayScreen = 16; // name of moon screen
+        displayScreen = 17; // name of moon screen
       }
       else{
         displayScreen = 9;
       }
     } 
-    if(displayScreen == 10 || displayScreen  == 17 ){
+    if(displayScreen == 10 || displayScreen  == 18 ){
       // button pressed on date screen
       rhymeFlag = !rhymeFlag;
       if(rhymeFlag){
-        displayScreen = 17; // day rhyme
+        displayScreen = 18; // day rhyme
       }
       else{
         displayScreen = 10;
       }
     } 
 
-    if(displayScreen == 11 || displayScreen  == 18 ){
+    if(displayScreen == 11 || displayScreen  == 19 ){
       // button pressed on calendar screen
       rhymeMonthFlag = !rhymeMonthFlag;
       if(rhymeMonthFlag){
-        displayScreen = 18; // month rhyme
+        displayScreen = 19; // month rhyme
       }
       else{
         displayScreen = 11;
       }
+    }
+
+    if(displayScreen == 12){
+      // button pressed on humidity screen
+      humidityUpdate = true;
+      greetingHumidity = "Reading updated";
     }
   } 
   last_interrupt_time = interrupt_time;
@@ -2081,7 +2164,26 @@ void joySwitchISR(){
    pressure = barometer.getPressure();
  }
 /********************************************************/
+void getHumidity(){
+  // reads the DHT11, checks thst Sensor reading is OK. If not then returns errorHardware3 = true
+   checkDHT11 = DHT11.read(DHT11PIN);
+   humidityValue = 0; // rest value
+   dewPointValue = 0;
+   switch (checkDHT11)
+   {
+     case 0: errorHardware3 = false; break;
+     case -1: errorHardware3 = true; break;
+     case -2: errorHardware3 = true; break;
+     default: errorHardware3 = true; break;
+   }
+   if(errorHardware3 == false){
+    humidityValue = DHT11.humidity; // only return a value if reading was good
+    dewPointValue = DHT11.dewPoint();
+   }
+}
 
+/********************************************************/
+//
 // calculate first day of month
 int startDayOfWeek(int y, int m, int d){
   static int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
@@ -2239,6 +2341,14 @@ void drawTemperatureGraph(){
   u8g.drawLine(0,48,128,48); // 10 degrees C  
   u8g.drawLine(0,32,128,32); // 20 degrees C 
   u8g.drawLine(0,16,128,16); // 30 degrees C 
+}
+/**********************************************************/
+void buzzer(){
+  // sounds buzzer
+  digitalWrite(buzzerPin, LOW);  // turn the buzzer ON briefly
+  delay(200);
+  digitalWrite(buzzerPin, HIGH); // turn buzzer off
+  delay(50);
 }
 /**********************************************************/
 

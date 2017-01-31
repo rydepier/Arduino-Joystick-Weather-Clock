@@ -1,6 +1,6 @@
 # Arduino-Joystick-Weather-Clock
 
-This project was updated in Feb. 2017 to incluse a Humidity Sensor.
+This project was updated in Feb. 2017 to include a Humidity Sensor.
 
 This clock has 21 screens selected using a joystick. Everything from weather forecast to moon phase on OLED screen. The project requires an Arduino Mega, a real time clock (DS1307), a pressure sensor (BMP180), a Humidity Sensor (DHT 11), an active buzzer, an SD Card and a joystick with switch. Data is shown on 22 screens, selected using the joystick and an Anlo Clock, Digital Clock, Alarm and Timer are included.
 

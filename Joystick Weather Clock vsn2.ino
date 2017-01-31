@@ -48,7 +48,7 @@ Wire RTC::
 //
 Wire DHT11 humidity Sensor
  VCC +5v
- OUT Arduino pin 2
+ OUT Arduino pin 12
  GND GND
 //
 Wire OLED::

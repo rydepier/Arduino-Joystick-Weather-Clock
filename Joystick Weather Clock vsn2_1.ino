@@ -2,6 +2,11 @@
 Joystick controlled Clock using OLED Display
 by Chris Rouse August 2015
 
+Version History:
+Sept 2015 - first version
+February 2017 - version 2.0 added Humidity Sensor
+February 2017 - version 2.1 improved humidity function and corrected some code
+
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
 
@@ -136,8 +141,11 @@ Small LED (green) to show backup data being saved to SD Card
   const char* greetingHumidity = "";
   boolean humidityUpdate = false; // shows if humidity was manually updated
   float humidityValue = 0.0;
+  volatile int lastReading; // last time a Humidity reading was taken
+  volatile int readingAge; // current minute
   String thisDewPoint = "";
   String thisHumidity = "";
+  
 //
 // Setup RTC
   RTC_DS1307 RTC;
@@ -390,6 +398,8 @@ void setup(void) {
   }
   else{
    Serial.println(F("RTC is running")); 
+   DateTime now = RTC.now();
+   readingAge = now.minute();
    errorHardware1 = false;   
   }    
   Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
@@ -404,6 +414,7 @@ void setup(void) {
   getHumidity(); // check the Humidity sensor
   if(errorHardware3 == false){
     Serial.println("DHT11 reading OK");
+    lastReading = readingAge;
     buzzer();
   }
   else{
@@ -695,6 +706,7 @@ void loop() {
  // take a temperature/pressure reading once only every 10 seconds
  // this should even out the display using the large fonts
   DateTime now = RTC.now();  // read the RTC 
+  readingAge = now.minute();
   if(int((now.second()/10)*10) == now.second() && grabFlag == true){
     getPressure();
     localTemp= temperature;
@@ -714,6 +726,7 @@ void loop() {
     }
     //
     getHumidity(); // read the current value
+    lastReading = readingAge; // used in Humidity reading
     recordPointer = now.hour();
     recordDataTemp[0][recordPointer] = localTemp;
     recordDataTemp[0][24] = recordPointer; // save the pointer
@@ -1985,23 +1998,37 @@ void drawHumidity(){
   //
   if(errorHardware3 == false){
     thisHumidity = String(int(humidityValue)) + "%"; // displays percentage symbol
+    const char* newHumidity = (const char*) thisHumidity.c_str();
+    u8g.setFont(u8g_font_profont29);    
+    u8g.drawStr(35,40, newHumidity);  
+    //
+    u8g.setFont(u8g_font_profont15);
+    u8g.drawStr(10,60, greetingHumidity);
+    // now add dewpoint
+    u8g.setFont(u8g_font_profont12);
+    u8g.drawStr(100,20, "Dew");
+    u8g.drawStr(95,30, "Point");
+    thisDewPoint = String(dewPointValue) +  "\260C";
+    const char* newDewPoint = (const char*) thisDewPoint.c_str();
+    u8g.drawStr(100,43,  newDewPoint);
+    //
+    // show age of reading
+    if((readingAge - lastReading) == 0){
+      greetingHumidity = "Reading updated";
+    }
+    else{
+      greetingHumidity = "Click to Update";
+    } 
+    String ageValue = String(readingAge - lastReading);
+    const char* newAge = (const char*) ageValue.c_str();
+    u8g.drawStr(13,35, newAge);
+    u8g.drawStr(10,22, "Age");
+    u8g.drawStr(10,45, "min");
   }
   else{
-    thisHumidity = "--"; // problem with reading
+    u8g.drawStr(10,30, " Humidity Sensor");
+    u8g.drawStr(10,45, "     Missing");
   }
-  const char* newHumidity = (const char*) thisHumidity.c_str();
-  u8g.setFont(u8g_font_profont29);    
-  u8g.drawStr(35,40, newHumidity);  
-  //
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(10,60, greetingHumidity);
-  // now add dewpoint
-  u8g.setFont(u8g_font_profont12);
-  u8g.drawStr(100,20, "Dew");
-  u8g.drawStr(95,30, "Point");
-  thisDewPoint = String(dewPointValue) +  "\260C";
-  const char* newDewPoint = (const char*) thisDewPoint.c_str();
-  u8g.drawStr(100,43,  newDewPoint);
 }
 /*************************************************************/
 
@@ -2142,6 +2169,7 @@ void joySwitchISR(){
       // button pressed on humidity screen
       humidityUpdate = true;
       greetingHumidity = "Reading updated";
+      lastReading = readingAge;
     }
   } 
   last_interrupt_time = interrupt_time;
@@ -2167,7 +2195,7 @@ void joySwitchISR(){
 void getHumidity(){
   // reads the DHT11, checks thst Sensor reading is OK. If not then returns errorHardware3 = true
    checkDHT11 = DHT11.read(DHT11PIN);
-   humidityValue = 0; // rest value
+   humidityValue = 0; // reset value
    dewPointValue = 0;
    switch (checkDHT11)
    {
